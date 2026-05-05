@@ -181,18 +181,33 @@ function impactEmoji(score) {
 
 // CORS-friendly proxy (allorigins.win) - 카드 등록 없이 사용 가능
 async function fetchProxy(url, timeoutMs = 12000) {
-  const proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const r = await fetch(proxy, { signal: ctrl.signal });
-    clearTimeout(tid);
-    if (!r.ok) throw new Error(r.status);
-    return await r.text();
-  } catch (e) {
-    clearTimeout(tid);
-    throw e;
+  // 사용자 Cloudflare Worker 우선 → 그 다음 corsproxy.io → 마지막 AllOrigins
+  const worker = STATE.settings.workerUrl;
+  const proxies = [];
+  if (worker) {
+    proxies.push(worker.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url));
   }
+  proxies.push('https://corsproxy.io/?' + encodeURIComponent(url));
+  proxies.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+
+  let lastErr = null;
+  for (const proxy of proxies) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(proxy, { signal: ctrl.signal });
+      clearTimeout(tid);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const txt = await r.text();
+      if (txt && txt.length > 50) return txt;  // 너무 짧으면 실패로 간주
+      throw new Error('empty response');
+    } catch (e) {
+      clearTimeout(tid);
+      lastErr = e;
+      console.warn(`프록시 실패 (${proxy.substring(0, 60)}...):`, e.message);
+    }
+  }
+  throw lastErr || new Error('all proxies failed');
 }
 
 // ---- 한국 뉴스: 네이버 금융 (allorigins 프록시) ----
