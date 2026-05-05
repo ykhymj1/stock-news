@@ -15,6 +15,7 @@ const DEFAULTS = {
     popupEnabled: true,
     dartKey: '',
     workerUrl: 'https://ykh-stock-proxy.kyunghoyou.workers.dev',
+    newsProxyUrl: 'https://ykh-news-proxy.kyunghoyou.workers.dev',
   },
   recommendations: {},  // { 'YYYY-MM-DD': { kr: [{...}], us: [{...}] } }
   tracking: [],         // [{ ticker, name, market, addedDate, addedPrice, currentPrice, prices: [...], reason }]
@@ -181,14 +182,17 @@ function impactEmoji(score) {
 
 // CORS-friendly proxy (allorigins.win) - 카드 등록 없이 사용 가능
 async function fetchProxy(url, timeoutMs = 12000) {
-  // 사용자 Cloudflare Worker 우선 → 그 다음 corsproxy.io → 마지막 AllOrigins
-  const worker = STATE.settings.workerUrl;
-  const proxies = [];
-  if (worker) {
-    proxies.push(worker.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url));
-  }
-  proxies.push('https://corsproxy.io/?' + encodeURIComponent(url));
-  proxies.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+  // 새 RSS/뉴스 전용 Worker 사용 (기존 stock-proxy와 분리)
+  // 1순위: 본인 ykh-news-proxy
+  // 2순위: 외부 무료 프록시 (폴백)
+  const newsProxy = STATE.settings.newsProxyUrl || 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+
+  const proxies = [
+    newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url),
+    'https://corsproxy.io/?' + encodeURIComponent(url),
+    'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+  ];
 
   let lastErr = null;
   for (const proxy of proxies) {
@@ -199,8 +203,8 @@ async function fetchProxy(url, timeoutMs = 12000) {
       clearTimeout(tid);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const txt = await r.text();
-      if (txt && txt.length > 50) return txt;  // 너무 짧으면 실패로 간주
-      throw new Error('empty response');
+      if (txt && txt.length > 50 && !txt.startsWith('{"error"')) return txt;
+      throw new Error('empty/error response');
     } catch (e) {
       clearTimeout(tid);
       lastErr = e;
@@ -1132,6 +1136,7 @@ function loadSettings() {
   document.getElementById('popupEnabled').checked = STATE.settings.popupEnabled;
   document.getElementById('dartKey').value = STATE.settings.dartKey || '';
   document.getElementById('workerUrl').value = STATE.settings.workerUrl || '';
+  document.getElementById('newsProxyUrl').value = STATE.settings.newsProxyUrl || '';
 }
 
 function saveSettings() {
@@ -1140,6 +1145,7 @@ function saveSettings() {
   STATE.settings.popupEnabled = document.getElementById('popupEnabled').checked;
   STATE.settings.dartKey = document.getElementById('dartKey').value.trim();
   STATE.settings.workerUrl = document.getElementById('workerUrl').value.trim();
+  STATE.settings.newsProxyUrl = document.getElementById('newsProxyUrl').value.trim();
   saveState();
   setupAutoRefresh();
   showToast('설정 저장됨');
