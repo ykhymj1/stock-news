@@ -303,8 +303,6 @@ function impactEmoji(score) {
 // CORS-friendly proxy (allorigins.win) - 카드 등록 없이 사용 가능
 async function fetchProxy(url, timeoutMs = 12000) {
   // 새 RSS/뉴스 전용 Worker 사용 (기존 stock-proxy와 분리)
-  // 1순위: 본인 ykh-news-proxy
-  // 2순위: 외부 무료 프록시 (폴백)
   const newsProxy = STATE.settings.newsProxyUrl || 'https://ykh-news-proxy.kyunghoyou.workers.dev';
 
   const proxies = [
@@ -323,12 +321,25 @@ async function fetchProxy(url, timeoutMs = 12000) {
       clearTimeout(tid);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const txt = await r.text();
-      if (txt && txt.length > 50 && !txt.startsWith('{"error"')) return txt;
-      throw new Error('empty/error response');
+      // 빈 응답 또는 에러 JSON 응답 거부
+      if (!txt || txt.length < 50) throw new Error('empty response');
+      // 에러 JSON 응답 거부 (예: {"error": "host not allowed"})
+      if (txt.startsWith('{"error"') || txt.startsWith('{ "error"')) {
+        try {
+          const errJson = JSON.parse(txt);
+          throw new Error(errJson.error || 'proxy error');
+        } catch (parseE) {
+          throw new Error('error response');
+        }
+      }
+      return txt;
     } catch (e) {
       clearTimeout(tid);
       lastErr = e;
-      console.warn(`프록시 실패 (${proxy.substring(0, 60)}...):`, e.message);
+      // 첫 시도 실패는 조용히, 나머지는 경고
+      if (proxy !== proxies[0]) {
+        console.warn(`프록시 실패 (${proxy.substring(0, 60)}...):`, e.message);
+      }
     }
   }
   throw lastErr || new Error('all proxies failed');
@@ -779,36 +790,55 @@ function getETFs(ticker, market) {
 }
 
 function extractTickerKR(text) {
-  // window.extractAllKRTickers가 있으면 우선 사용 (외부 파일)
-  if (window.extractAllKRTickers) {
-    const found = window.extractAllKRTickers(text);
-    if (found.length > 0) return found[0];
-  }
-  // 기본 매핑 fallback
-  const stocks = getKRStocks();
-  // 긴 이름 우선 (정확도 향상)
+  // 외부 stocks 데이터 사용
+  const stocks = window.KR_STOCKS || {};
   const sortedNames = Object.keys(stocks).sort((a, b) => b.length - a.length);
   for (const name of sortedNames) {
     if (text.includes(name)) return { ticker: stocks[name], name };
   }
   // 6자리 숫자 직접 매칭
   const m = text.match(/\b(\d{6})\b/);
-  if (m) return { ticker: m[1], name: '미상' };
+  if (m) {
+    const codeToName = window.KR_CODE_TO_NAME || {};
+    return { ticker: m[1], name: codeToName[m[1]] || '미상' };
+  }
   return null;
 }
 
-// 한 텍스트에서 여러 한국 종목 모두 추출
+// 한 텍스트에서 여러 한국 종목 모두 추출 (kr_stocks.js의 함수 사용)
 function extractAllKRTickers(text) {
-  if (window.extractAllKRTickers) return window.extractAllKRTickers(text);
-  return [];
+  // window.extractAllKRTickers는 kr_stocks.js에서 정의된 외부 함수
+  // 자기 자신과 이름이 겹치므로 직접 stocks 객체에서 추출
+  const stocks = window.KR_STOCKS || {};
+  const found = [];
+  const seen = new Set();
+  // 1) 회사명 직접 매칭 (긴 이름 우선)
+  const sortedNames = Object.keys(stocks).sort((a, b) => b.length - a.length);
+  for (const name of sortedNames) {
+    if (text.includes(name)) {
+      const code = stocks[name];
+      if (!seen.has(code)) {
+        seen.add(code);
+        found.push({ ticker: code, name });
+      }
+    }
+  }
+  // 2) 6자리 종목코드 직접 매칭
+  const codeMatches = text.match(/\b(\d{6})\b/g);
+  if (codeMatches) {
+    const codeToName = window.KR_CODE_TO_NAME || {};
+    for (const code of codeMatches) {
+      if (!seen.has(code) && codeToName[code]) {
+        seen.add(code);
+        found.push({ ticker: code, name: codeToName[code] });
+      }
+    }
+  }
+  return found;
 }
 
 function extractTickerUS(text, knownTicker = null) {
-  if (window.extractUSTicker) {
-    const r = window.extractUSTicker(text);
-    if (r) return r;
-  }
-  const stocks = getUSStocks();
+  const stocks = window.US_STOCKS || {};
   const lower = text.toLowerCase();
   const sortedNames = Object.keys(stocks).sort((a, b) => b.length - a.length);
   for (const name of sortedNames) {
@@ -816,9 +846,19 @@ function extractTickerUS(text, knownTicker = null) {
       return { ticker: stocks[name], name: name.charAt(0).toUpperCase() + name.slice(1) };
     }
   }
-  if (knownTicker) return { ticker: knownTicker, name: knownTicker };
+  // SEC 형식: "Apple Inc (0000320193)"
   const m = text.match(/- (.+?) \(\d{10}\)/);
-  if (m) return { ticker: m[1].slice(0, 6).toUpperCase().replace(/\s/g, ''), name: m[1] };
+  if (m) {
+    const company = m[1].trim();
+    const lc = company.toLowerCase();
+    for (const name of sortedNames) {
+      if (lc.includes(name)) {
+        return { ticker: stocks[name], name: company };
+      }
+    }
+    return { ticker: company.replace(/[^A-Z0-9]/gi, '').slice(0, 10).toUpperCase(), name: company };
+  }
+  if (knownTicker) return { ticker: knownTicker, name: knownTicker };
   return null;
 }
 
