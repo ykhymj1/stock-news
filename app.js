@@ -776,14 +776,10 @@ async function analyzeWithGemini(text, lang = 'ko') {
   }
   try {
     const prompt = lang === 'ko'
-      ? `한국 주식 관련 다음 뉴스/공시를 분석하고 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 절대 포함하지 마세요.
-
-{"impact": 1-10 사이 정수, "reason": "한 문장 핵심 분석", "positives": ["긍정 요인 1", "긍정 요인 2"], "negatives": ["부정 요인 1"]}
+      ? `다음 한국 주식 뉴스를 분석. impact는 1-10 정수(7+ = 호재). reason은 30자 이내. positives/negatives는 각 짧은 키워드 2-3개.
 
 뉴스: ${text}`
-      : `Analyze this US stock news/filing. Respond ONLY in this exact JSON format. Do NOT include any other text.
-
-{"impact": integer 1-10, "reason": "one sentence analysis in Korean", "positives": ["positive 1", "positive 2"], "negatives": ["negative 1"]}
+      : `Analyze this US stock news. impact is integer 1-10 (7+ = bullish). reason is in Korean, 30 chars max. positives/negatives are short Korean keywords (2-3 each).
 
 News: ${text}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
@@ -794,7 +790,7 @@ News: ${text}`;
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.2,
-          maxOutputTokens: 500,
+          maxOutputTokens: 1024,  // 충분히 길게
           responseMimeType: 'application/json',  // 🔑 JSON 강제
           responseSchema: {
             type: 'object',
@@ -826,28 +822,41 @@ News: ${text}`;
       console.warn('[Gemini] 빈 응답', j);
       return null;
     }
-    console.log('[Gemini] 원본 응답:', respText.substring(0, 200));
+    console.log('[Gemini] 원본 응답 (길이 ' + respText.length + '):', respText.substring(0, 150));
 
-    // responseMimeType: 'application/json' 사용 시 응답이 바로 JSON 문자열
+    // 1) 직접 JSON 파싱 시도
     try {
       const parsed = JSON.parse(respText);
       console.log('[Gemini] ✅ 분석 성공:', parsed.impact, '/', 10);
       return parsed;
-    } catch (e) {
-      // 폴백: JSON 부분 추출 시도
-      const m = respText.match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          const parsed = JSON.parse(m[0]);
-          console.log('[Gemini] ✅ 분석 성공 (폴백):', parsed.impact, '/', 10);
-          return parsed;
-        } catch (e2) {
-          console.warn('[Gemini] JSON 파싱 실패:', m[0].substring(0, 100));
-        }
-      } else {
-        console.warn('[Gemini] JSON 추출 실패. 원본:', respText.substring(0, 200));
-      }
+    } catch (e) {}
+
+    // 2) JSON 부분 추출 시도
+    const m = respText.match(/\{[\s\S]*\}/);
+    if (m) {
+      try {
+        const parsed = JSON.parse(m[0]);
+        console.log('[Gemini] ✅ 분석 성공 (추출):', parsed.impact, '/', 10);
+        return parsed;
+      } catch (e) {}
     }
+
+    // 3) 잘린 JSON 복구 시도 (impact + reason 부분만이라도 추출)
+    const impactMatch = respText.match(/"impact"\s*:\s*(\d+)/);
+    const reasonMatch = respText.match(/"reason"\s*:\s*"([^"]+)"/);
+    if (impactMatch || reasonMatch) {
+      const recovered = {
+        impact: impactMatch ? parseInt(impactMatch[1]) : null,
+        reason: reasonMatch ? reasonMatch[1] : '응답이 잘려서 일부만 표시됩니다',
+        positives: [],
+        negatives: [],
+        truncated: true,
+      };
+      console.log('[Gemini] ⚠️ 응답 잘림 - 부분 복구:', recovered.impact, '/', 10);
+      return recovered;
+    }
+
+    console.warn('[Gemini] 모든 파싱 실패. 원본:', respText.substring(0, 200));
     return null;
   } catch (e) {
     console.error('[Gemini] 예외:', e.message);
@@ -1547,13 +1556,14 @@ async function openDetail(ticker, market) {
       const box = document.getElementById('aiAnalysisBox');
       if (box && aiResult) {
         let html = '';
+        if (aiResult.truncated) html += `<div style="color:#dc2626;font-size:10px;margin-bottom:4px;">⚠️ 응답이 잘려서 일부만 표시</div>`;
         if (aiResult.impact) html += `📊 <strong>AI 임팩트:</strong> ${aiResult.impact}/10<br>`;
         if (aiResult.reason) html += `💡 <strong>분석:</strong> ${escapeHtml(aiResult.reason)}<br>`;
         if (aiResult.positives?.length) html += `📈 <strong>긍정:</strong> ${aiResult.positives.map(escapeHtml).join(', ')}<br>`;
         if (aiResult.negatives?.length) html += `📉 <strong>부정:</strong> ${aiResult.negatives.map(escapeHtml).join(', ')}`;
         box.innerHTML = html || '분석 결과 없음';
       } else if (box) {
-        box.innerHTML = '<span style="color:#94a3b8;">AI 분석 실패 (API 키 확인 또는 네트워크)</span>';
+        box.innerHTML = '<span style="color:#94a3b8;">AI 분석 실패 (콘솔 로그 확인)</span>';
       }
     }, 100);
   } else {
