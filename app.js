@@ -6,6 +6,9 @@
 // 1. STATE & STORAGE
 // ============================================
 const STORE_KEY = 'stockradar_v2';
+// API 키는 별도 저장 (버전 업그레이드해도 유지됨)
+const API_KEYS_STORE = 'stockradar_api_keys_persistent';
+
 const DEFAULTS = {
   market: 'kr',
   view: 'today',
@@ -29,19 +32,89 @@ const DEFAULTS = {
 
 let STATE = loadState();
 
+// ============================================
+// API 키 영구 저장 (버전 업그레이드해도 유지)
+// ============================================
+function loadPersistentApiKeys() {
+  try {
+    const saved = localStorage.getItem(API_KEYS_STORE);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {}
+  return {};
+}
+
+function savePersistentApiKeys(keys) {
+  try {
+    localStorage.setItem(API_KEYS_STORE, JSON.stringify(keys));
+  } catch (e) {
+    console.error('API 키 저장 실패:', e);
+  }
+}
+
 function loadState() {
+  // 1) 영구 보관된 API 키 먼저 로드
+  const persistentKeys = loadPersistentApiKeys();
+
+  let baseState = JSON.parse(JSON.stringify(DEFAULTS));
+
+  // 2) 현재 버전 데이터 로드
   try {
     const saved = localStorage.getItem(STORE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      return { ...DEFAULTS, ...parsed, settings: { ...DEFAULTS.settings, ...(parsed.settings || {}) } };
+      baseState = {
+        ...baseState,
+        ...parsed,
+        settings: { ...baseState.settings, ...(parsed.settings || {}) }
+      };
+    } else {
+      // 3) 이전 버전(v1)에서 자동 마이그레이션
+      const oldData = localStorage.getItem('stockradar_v1');
+      if (oldData) {
+        try {
+          const old = JSON.parse(oldData);
+          baseState = {
+            ...baseState,
+            ...old,
+            settings: { ...baseState.settings, ...(old.settings || {}) }
+          };
+          console.log('✅ v1 → v2 데이터 자동 마이그레이션 완료');
+          // 이전 버전 키들에서 API 키 영구 저장소로 백업
+          if (old.settings?.dartKey) persistentKeys.dartKey = old.settings.dartKey;
+          if (old.settings?.geminiKey) persistentKeys.geminiKey = old.settings.geminiKey;
+          if (old.settings?.workerUrl) persistentKeys.workerUrl = old.settings.workerUrl;
+          if (old.settings?.newsProxyUrl) persistentKeys.newsProxyUrl = old.settings.newsProxyUrl;
+        } catch (e) {}
+      }
     }
   } catch (e) {}
-  return JSON.parse(JSON.stringify(DEFAULTS));
+
+  // 4) 영구 저장된 API 키로 덮어쓰기 (가장 우선)
+  if (persistentKeys.dartKey) baseState.settings.dartKey = persistentKeys.dartKey;
+  if (persistentKeys.geminiKey) baseState.settings.geminiKey = persistentKeys.geminiKey;
+  if (persistentKeys.workerUrl) baseState.settings.workerUrl = persistentKeys.workerUrl;
+  if (persistentKeys.newsProxyUrl) baseState.settings.newsProxyUrl = persistentKeys.newsProxyUrl;
+  if (persistentKeys.useGemini !== undefined) baseState.settings.useGemini = persistentKeys.useGemini;
+
+  // 5) 영구 저장소 갱신 (마이그레이션된 키 저장)
+  savePersistentApiKeys(persistentKeys);
+
+  return baseState;
 }
 
 function saveState() {
+  // 1) 일반 상태 저장
   localStorage.setItem(STORE_KEY, JSON.stringify(STATE));
+
+  // 2) API 키는 별도로 영구 저장
+  const persistentKeys = {
+    dartKey: STATE.settings.dartKey || '',
+    geminiKey: STATE.settings.geminiKey || '',
+    workerUrl: STATE.settings.workerUrl || '',
+    newsProxyUrl: STATE.settings.newsProxyUrl || '',
+    useGemini: STATE.settings.useGemini || false,
+  };
+  savePersistentApiKeys(persistentKeys);
 }
 
 // ============================================
@@ -1487,9 +1560,26 @@ function loadSettings() {
   if (document.getElementById('geminiKey')) document.getElementById('geminiKey').value = STATE.settings.geminiKey || '';
   if (document.getElementById('useGemini')) document.getElementById('useGemini').checked = STATE.settings.useGemini || false;
   if (document.getElementById('macroAlerts')) document.getElementById('macroAlerts').checked = STATE.settings.macroAlerts !== false;
+  updateKeyStatus();
 }
 
-function saveSettings() {
+function updateKeyStatus() {
+  // DART 키 상태 표시
+  const dartStatus = document.getElementById('dartKeyStatus');
+  if (dartStatus) {
+    const k = STATE.settings.dartKey;
+    dartStatus.textContent = k ? `· ✅ 저장됨 (${k.substring(0, 6)}...${k.substring(k.length - 4)})` : '';
+  }
+  // Gemini 키 상태 표시
+  const gemStatus = document.getElementById('geminiKeyStatus');
+  if (gemStatus) {
+    const k = STATE.settings.geminiKey;
+    gemStatus.textContent = k ? `· ✅ 저장됨 (${k.substring(0, 6)}...${k.substring(k.length - 4)})` : '';
+  }
+}
+
+let _saveDebounce = null;
+function saveSettings(showToastMsg = true) {
   STATE.settings.minImpact = parseInt(document.getElementById('minImpact').value) || 6;
   STATE.settings.refreshMins = parseInt(document.getElementById('refreshMins').value) || 0;
   STATE.settings.popupEnabled = document.getElementById('popupEnabled').checked;
@@ -1499,9 +1589,15 @@ function saveSettings() {
   if (document.getElementById('geminiKey')) STATE.settings.geminiKey = document.getElementById('geminiKey').value.trim();
   if (document.getElementById('useGemini')) STATE.settings.useGemini = document.getElementById('useGemini').checked;
   if (document.getElementById('macroAlerts')) STATE.settings.macroAlerts = document.getElementById('macroAlerts').checked;
-  saveState();
+  saveState();  // → 일반 + API 키 영구 저장 둘 다 됨
   setupAutoRefresh();
-  showToast('설정 저장됨');
+  updateKeyStatus();
+
+  // 디바운싱 (입력 중 너무 자주 토스트 뜨지 않게)
+  if (showToastMsg) {
+    if (_saveDebounce) clearTimeout(_saveDebounce);
+    _saveDebounce = setTimeout(() => showToast('💾 저장됨'), 300);
+  }
 }
 
 function exportData() {
@@ -1543,8 +1639,9 @@ function handleImport(event) {
 }
 
 function confirmResetAll() {
-  if (!confirm('모든 추천/추적 기록을 삭제합니다. 정말 진행하시겠어요?')) return;
+  if (!confirm('모든 추천/추적 기록을 삭제합니다.\n\n⚠️ API 키와 Worker URL은 안전하게 보존됩니다.\n\n진행하시겠어요?')) return;
   if (!confirm('정말 삭제? 이 작업은 되돌릴 수 없습니다.')) return;
+  // API 키는 영구 저장소에 따로 있으므로 STATE만 초기화하면 자동 복원됨
   STATE.recommendations = {};
   STATE.tracking = [];
   STATE.alertsSeen = [];
@@ -1552,7 +1649,7 @@ function confirmResetAll() {
   renderToday();
   renderTracking();
   renderHistory();
-  showToast('초기화 완료');
+  showToast('초기화 완료 (API 키는 유지됨)');
 }
 
 // ============================================
