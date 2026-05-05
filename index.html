@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<meta name="theme-color" content="#2563eb"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<title>📡 StockRadar - 급등주 레이더</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;background:#f8fafc;font-family:'Noto Sans KR',sans-serif;color:#111827;-webkit-font-smoothing:antialiased;}
+button{touch-action:manipulation;cursor:pointer;font-family:'Noto Sans KR',sans-serif;border:none;background:none;}
+input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
+.mono{font-family:'DM Mono',monospace;font-variant-numeric:tabular-nums;}
+
+/* ========== APP SHELL ========== */
+#app{max-width:480px;margin:0 auto;min-height:100vh;background:#fff;position:relative;padding-bottom:80px;}
+
+/* ========== HEADER ========== */
+.app-header{
+  position:sticky;top:0;background:#fff;z-index:50;
+  padding:14px 18px 12px;border-bottom:1px solid #e5e7eb;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.app-title{display:flex;align-items:center;gap:10px;}
+.app-title .logo{
+  width:36px;height:36px;border-radius:12px;
+  background:linear-gradient(135deg,#2563eb,#1d4ed8);
+  display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;
+  box-shadow:0 4px 12px rgba(37,99,235,0.3);
+}
+.app-title h1{margin:0;font-size:17px;font-weight:800;letter-spacing:-0.3px;}
+.app-title .sub{font-size:10px;color:#6b7280;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;}
+.header-btn{
+  width:38px;height:38px;border-radius:10px;background:#f1f5f9;
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+  transition:all .15s;
+}
+.header-btn:active{background:#e2e8f0;transform:scale(0.95);}
+
+/* ========== TAB BAR (BOTTOM) ========== */
+.tab-bar{
+  position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;
+  background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);
+  border-top:1px solid #e5e7eb;display:flex;justify-content:space-around;
+  padding:8px 4px calc(8px + env(safe-area-inset-bottom));z-index:40;
+}
+.tab{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:6px 4px;color:#9ca3af;font-size:10px;font-weight:600;
+  border-radius:8px;transition:all .15s;
+}
+.tab.active{color:#2563eb;}
+.tab .ico{font-size:20px;}
+.tab.active .ico{transform:scale(1.1);}
+
+/* ========== MARKET TABS ========== */
+.market-tabs{display:flex;padding:12px 18px;gap:8px;background:#fff;border-bottom:1px solid #f1f5f9;}
+.mkt-tab{
+  flex:1;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:700;
+  background:#f8fafc;color:#64748b;border:1px solid transparent;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  transition:all .15s;
+}
+.mkt-tab.active{background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#1d4ed8;border-color:#bfdbfe;}
+.mkt-tab .flag{font-size:14px;}
+
+/* ========== HERO CARD (TOP RECOMMENDATION) ========== */
+.hero-section{padding:16px 18px 8px;}
+.hero-card{
+  background:linear-gradient(135deg,#1e3a8a,#2563eb,#3b82f6);
+  border-radius:20px;padding:18px 20px;color:#fff;
+  position:relative;overflow:hidden;
+  box-shadow:0 8px 28px rgba(37,99,235,0.25);
+}
+.hero-card::before{
+  content:"";position:absolute;top:-40px;right:-40px;
+  width:160px;height:160px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,0.15) 0%,transparent 70%);
+}
+.hero-label{font-size:10px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;font-weight:700;}
+.hero-date{font-size:11px;margin-top:4px;opacity:0.75;}
+.hero-summary{margin-top:14px;display:flex;align-items:center;gap:14px;}
+.hero-summary .num{font-family:'DM Mono',monospace;font-size:32px;font-weight:700;line-height:1;}
+.hero-summary .desc{font-size:12px;opacity:0.85;line-height:1.5;}
+
+/* ========== CARDS ========== */
+.section-title{
+  font-size:13px;font-weight:800;color:#374151;margin:18px 18px 10px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.section-title .badge{
+  font-size:10px;background:#2563eb;color:#fff;
+  padding:2px 8px;border-radius:8px;font-weight:700;
+}
+
+.stock-card{
+  margin:0 18px 10px;background:#fff;border:1px solid #e5e7eb;
+  border-radius:16px;padding:14px;cursor:pointer;
+  transition:all .15s;position:relative;overflow:hidden;
+}
+.stock-card:active{background:#f8fafc;transform:scale(0.99);}
+.stock-card.top{
+  border:none;background:linear-gradient(180deg,#fffbeb,#fff);
+  border:1.5px solid #fbbf24;
+}
+.stock-card.top::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,#f59e0b,#d97706);
+}
+
+.stock-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.stock-info{flex:1;min-width:0;}
+.stock-name{font-size:15px;font-weight:800;color:#111827;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.stock-name .rank{
+  width:22px;height:22px;border-radius:6px;background:#1e293b;
+  color:#fff;font-size:11px;display:inline-flex;align-items:center;justify-content:center;
+  font-family:'DM Mono',monospace;font-weight:700;
+}
+.stock-card.top .stock-name .rank{background:linear-gradient(135deg,#f59e0b,#d97706);}
+.stock-name .ticker{font-size:11px;color:#6b7280;font-family:'DM Mono',monospace;font-weight:500;}
+
+.stock-meta{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;color:#6b7280;}
+.stock-meta .dot{color:#cbd5e1;}
+
+.impact-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 8px;border-radius:8px;font-size:11px;font-weight:700;
+  font-family:'DM Mono',monospace;
+}
+.impact-10,.impact-9{background:#fef2f2;color:#b91c1c;}
+.impact-8,.impact-7{background:#fffbeb;color:#b45309;}
+.impact-6{background:#f0fdf4;color:#15803d;}
+.impact-5{background:#f1f5f9;color:#475569;}
+.impact-low{background:#f1f5f9;color:#64748b;}
+
+.price-block{text-align:right;flex-shrink:0;}
+.price-block .price{font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#111827;}
+.price-block .change{font-family:'DM Mono',monospace;font-size:12px;font-weight:600;margin-top:2px;}
+.up{color:#dc2626;}
+.down{color:#2563eb;}
+.flat{color:#6b7280;}
+
+.tracking-bar{
+  margin-top:10px;padding-top:10px;border-top:1px dashed #e5e7eb;
+  display:flex;align-items:center;gap:10px;font-size:11px;
+}
+.tracking-bar .label{color:#6b7280;}
+.tracking-bar .value{font-family:'DM Mono',monospace;font-weight:700;}
+
+.news-snippet{
+  margin-top:10px;padding:10px 12px;background:#f8fafc;
+  border-radius:10px;font-size:12px;color:#475569;line-height:1.5;
+}
+.news-snippet .src{font-size:10px;color:#9ca3af;margin-top:4px;display:flex;align-items:center;gap:6px;}
+
+/* ========== VIEWS ========== */
+.view{display:none;}
+.view.active{display:block;}
+
+/* ========== EMPTY STATE ========== */
+.empty{
+  text-align:center;padding:60px 24px;color:#94a3b8;
+}
+.empty .ico{font-size:48px;margin-bottom:12px;opacity:0.5;}
+.empty .title{font-size:14px;font-weight:700;color:#475569;margin-bottom:4px;}
+.empty .desc{font-size:12px;line-height:1.6;}
+
+/* ========== CONTROL BUTTONS ========== */
+.action-row{display:flex;gap:8px;padding:0 18px;margin-bottom:12px;}
+.action-btn{
+  flex:1;padding:10px 14px;border-radius:10px;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s;
+}
+.action-btn.primary{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;}
+.action-btn.primary:active{transform:scale(0.97);}
+.action-btn.secondary{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;}
+.action-btn.secondary:active{background:#e2e8f0;}
+
+/* ========== HISTORY VIEW ========== */
+.history-day{
+  margin:0 18px 14px;background:#fff;border:1px solid #e5e7eb;
+  border-radius:14px;overflow:hidden;
+}
+.history-day-header{
+  padding:12px 14px;background:linear-gradient(135deg,#f8fafc,#f1f5f9);
+  border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;
+}
+.history-day-header .date{font-size:13px;font-weight:800;color:#1e293b;}
+.history-day-header .count{font-size:11px;color:#64748b;}
+.history-stock{
+  padding:10px 14px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;gap:12px;
+}
+.history-stock:last-child{border-bottom:none;}
+.history-stock-info{flex:1;min-width:0;}
+.history-stock-name{font-size:13px;font-weight:700;color:#111827;}
+.history-stock-meta{font-size:10px;color:#6b7280;margin-top:2px;font-family:'DM Mono',monospace;}
+.history-perf{text-align:right;}
+.history-perf .pct{font-family:'DM Mono',monospace;font-size:14px;font-weight:700;}
+
+/* ========== TRACKING VIEW (sparkline + percent) ========== */
+.tracking-card{
+  margin:0 18px 12px;background:#fff;border:1px solid #e5e7eb;
+  border-radius:14px;padding:14px;
+}
+.tracking-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;}
+.tracking-info{flex:1;min-width:0;}
+.tracking-name{font-size:14px;font-weight:800;color:#111827;}
+.tracking-since{font-size:10px;color:#9ca3af;margin-top:2px;font-family:'DM Mono',monospace;}
+.tracking-perf{text-align:right;}
+.tracking-perf .big{font-family:'DM Mono',monospace;font-size:20px;font-weight:700;line-height:1;}
+.tracking-perf .small{font-size:10px;color:#6b7280;margin-top:3px;}
+.sparkline{height:50px;margin:8px 0 4px;display:flex;align-items:end;gap:1px;}
+.sparkline-bar{flex:1;border-radius:1px;min-height:2px;}
+.tracking-actions{display:flex;gap:8px;margin-top:8px;}
+.tracking-actions button{
+  padding:7px 12px;border-radius:8px;font-size:11px;font-weight:700;flex:1;
+}
+.btn-detail{background:#eff6ff;color:#1d4ed8;}
+.btn-delete{background:#fef2f2;color:#b91c1c;}
+
+/* ========== MODAL ========== */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,0.6);
+  z-index:100;display:none;align-items:flex-end;justify-content:center;
+}
+.modal-overlay.active{display:flex;}
+.modal-sheet{
+  background:#fff;border-radius:24px 24px 0 0;width:100%;max-width:480px;
+  max-height:88svh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  animation:slideUp .25s cubic-bezier(0.32,0.72,0,1);
+}
+@keyframes slideUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+.modal-header{
+  padding:16px 18px 12px;border-bottom:1px solid #f1f5f9;
+  display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+  position:sticky;top:0;background:#fff;z-index:5;
+}
+.modal-title{font-size:16px;font-weight:800;color:#111827;}
+.modal-subtitle{font-size:11px;color:#6b7280;margin-top:2px;}
+.modal-close{width:32px;height:32px;border-radius:10px;background:#f1f5f9;font-size:14px;}
+.modal-body{padding:14px 18px 32px;}
+
+.detail-section{margin-bottom:18px;}
+.detail-section-title{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#6b7280;font-weight:700;margin-bottom:8px;}
+
+.fin-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.fin-cell{
+  background:#f8fafc;border:1px solid #f1f5f9;border-radius:10px;padding:10px 12px;
+}
+.fin-cell .lbl{font-size:10px;color:#6b7280;font-weight:600;}
+.fin-cell .val{font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#111827;margin-top:2px;}
+
+.etf-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  background:#f0fdf4;color:#166534;padding:5px 10px;border-radius:8px;
+  font-size:11px;font-weight:600;margin:0 4px 4px 0;
+}
+.etf-chip .pct{font-family:'DM Mono',monospace;font-weight:700;color:#15803d;}
+
+.news-item{
+  padding:12px;background:#f8fafc;border-radius:10px;margin-bottom:8px;
+  border-left:3px solid #cbd5e1;
+}
+.news-item.positive{border-left-color:#16a34a;}
+.news-item.negative{border-left-color:#dc2626;}
+.news-item .news-title{font-size:13px;font-weight:600;color:#1e293b;line-height:1.5;}
+.news-item .news-meta{font-size:10px;color:#9ca3af;margin-top:4px;display:flex;gap:8px;align-items:center;}
+
+.analysis-text{
+  font-size:13px;line-height:1.7;color:#374151;
+  background:#f8fafc;padding:14px;border-radius:12px;border:1px solid #f1f5f9;
+}
+
+/* ========== TOAST ========== */
+.toast{
+  position:fixed;bottom:90px;left:50%;transform:translateX(-50%);
+  background:rgba(17,24,39,0.95);color:#fff;padding:12px 20px;
+  border-radius:12px;font-size:13px;font-weight:600;z-index:200;
+  box-shadow:0 8px 24px rgba(0,0,0,0.2);opacity:0;transition:opacity .25s;
+  pointer-events:none;max-width:90%;text-align:center;
+}
+.toast.show{opacity:1;}
+
+/* ========== ALERT POPUP (in-app notification) ========== */
+.alert-pop{
+  position:fixed;top:env(safe-area-inset-top);left:50%;transform:translateX(-50%) translateY(-110%);
+  max-width:460px;width:calc(100% - 24px);margin:8px 12px 0;z-index:150;
+  background:linear-gradient(135deg,#1e40af,#2563eb);color:#fff;
+  border-radius:14px;padding:12px 16px;
+  box-shadow:0 12px 32px rgba(37,99,235,0.4);
+  cursor:pointer;display:flex;align-items:center;gap:12px;
+  transition:transform .35s cubic-bezier(0.32,0.72,0,1);
+}
+.alert-pop.show{transform:translateX(-50%) translateY(env(safe-area-inset-top));}
+.alert-pop .ico{font-size:22px;flex-shrink:0;}
+.alert-pop .body{flex:1;min-width:0;}
+.alert-pop .ttl{font-size:12px;font-weight:800;letter-spacing:0.3px;}
+.alert-pop .desc{font-size:11px;opacity:0.9;margin-top:2px;line-height:1.4;}
+.alert-pop .close{padding:4px;font-size:14px;color:rgba(255,255,255,0.7);}
+
+/* ========== LOADING ========== */
+.loading{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:40px 20px;color:#94a3b8;
+}
+.spinner{
+  width:32px;height:32px;border:3px solid #e2e8f0;border-top-color:#2563eb;
+  border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:12px;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ========== SETTINGS ========== */
+.settings-card{
+  margin:0 18px 14px;background:#fff;border:1px solid #e5e7eb;
+  border-radius:14px;overflow:hidden;
+}
+.settings-row{
+  padding:14px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;
+}
+.settings-row:last-child{border-bottom:none;}
+.settings-label{font-size:13px;font-weight:600;color:#1e293b;}
+.settings-desc{font-size:11px;color:#6b7280;margin-top:2px;}
+.settings-input{
+  border:1.5px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:13px;
+  font-family:'DM Mono',monospace;outline:none;width:100px;text-align:right;
+}
+.settings-input:focus{border-color:#2563eb;}
+
+/* ========== SCROLLBAR ========== */
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- HEADER -->
+  <div class="app-header">
+    <div class="app-title">
+      <div class="logo">📡</div>
+      <div>
+        <div class="sub">STOCK RADAR</div>
+        <h1>급등주 레이더</h1>
+      </div>
+    </div>
+    <button class="header-btn" onclick="refreshData()" id="refreshBtn">↻</button>
+  </div>
+
+  <!-- MARKET TABS -->
+  <div class="market-tabs">
+    <button class="mkt-tab active" data-market="kr" onclick="switchMarket('kr')">
+      <span class="flag">🇰🇷</span> 한국 시장
+    </button>
+    <button class="mkt-tab" data-market="us" onclick="switchMarket('us')">
+      <span class="flag">🇺🇸</span> 미국 시장
+    </button>
+  </div>
+
+  <!-- VIEW: TODAY -->
+  <div id="view-today" class="view active">
+    <div class="hero-section">
+      <div class="hero-card">
+        <div class="hero-label">📅 오늘의 추천</div>
+        <div class="hero-date" id="heroDate">-</div>
+        <div class="hero-summary">
+          <div class="num" id="heroCount">0</div>
+          <div class="desc">
+            오늘 분석한 뉴스/공시 기반<br/>
+            급등 가능성 종목 추천
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="action-btn primary" onclick="analyzeNow()">
+        <span>🔍</span> 지금 분석
+      </button>
+      <button class="action-btn secondary" onclick="openMarketStatus()">
+        <span>📊</span> 시장 현황
+      </button>
+    </div>
+
+    <div class="section-title">
+      <span>🏆 오늘의 TOP 5</span>
+      <span class="badge" id="topBadge">분석중</span>
+    </div>
+    <div id="topList"></div>
+
+    <div class="section-title" style="margin-top:24px;">
+      <span>📋 추가 후보 (TOP 6-10)</span>
+    </div>
+    <div id="extraList"></div>
+  </div>
+
+  <!-- VIEW: TRACKING -->
+  <div id="view-tracking" class="view">
+    <div class="action-row" style="margin-top:14px;">
+      <button class="action-btn secondary" onclick="updateAllPrices()">
+        <span>↻</span> 전체 시세 갱신
+      </button>
+      <button class="action-btn secondary" onclick="confirmDeleteAll()">
+        <span>🗑</span> 전체 삭제
+      </button>
+    </div>
+    <div id="trackingList"></div>
+  </div>
+
+  <!-- VIEW: HISTORY -->
+  <div id="view-history" class="view">
+    <div id="historyList"></div>
+  </div>
+
+  <!-- VIEW: SETTINGS -->
+  <div id="view-settings" class="view">
+    <div class="section-title" style="margin-top:14px;">⚙️ 분석 설정</div>
+    <div class="settings-card">
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">최소 임팩트 점수</div>
+          <div class="settings-desc">이 점수 이상만 추천 (1~10)</div>
+        </div>
+        <input type="number" class="settings-input" id="minImpact" min="1" max="10" value="6" onchange="saveSettings()"/>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">자동 갱신 주기</div>
+          <div class="settings-desc">분 단위 (0=수동)</div>
+        </div>
+        <input type="number" class="settings-input" id="refreshMins" min="0" max="60" value="10" onchange="saveSettings()"/>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">앱 알림 팝업</div>
+          <div class="settings-desc">새 추천 시 화면 상단 팝업</div>
+        </div>
+        <input type="checkbox" id="popupEnabled" onchange="saveSettings()" style="width:42px;height:24px;"/>
+      </div>
+    </div>
+
+    <div class="section-title">🔑 API 키 (선택)</div>
+    <div class="settings-card">
+      <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+        <div style="width:100%;">
+          <div class="settings-label">DART API 키</div>
+          <div class="settings-desc">한국 공시 (opendart.fss.or.kr 무료, 카드X)</div>
+        </div>
+        <input type="text" id="dartKey" placeholder="없으면 비워둬도 됨" onchange="saveSettings()"
+               style="width:100%;border:1.5px solid #e2e8f0;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Mono',monospace;outline:none;"/>
+      </div>
+      <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+        <div style="width:100%;">
+          <div class="settings-label">Cloudflare Worker URL</div>
+          <div class="settings-desc">Yahoo/Naver 시세 프록시 (본인 Worker 사용)</div>
+        </div>
+        <input type="text" id="workerUrl" placeholder="https://ykh-stock-proxy.kyunghoyou.workers.dev" onchange="saveSettings()"
+               style="width:100%;border:1.5px solid #e2e8f0;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Mono',monospace;outline:none;"/>
+      </div>
+    </div>
+
+    <div class="section-title">📊 데이터</div>
+    <div class="settings-card">
+      <div class="settings-row" onclick="exportData()" style="cursor:pointer;">
+        <div>
+          <div class="settings-label">데이터 내보내기</div>
+          <div class="settings-desc">JSON 파일로 백업</div>
+        </div>
+        <span style="font-size:18px;">📥</span>
+      </div>
+      <div class="settings-row" onclick="importData()" style="cursor:pointer;">
+        <div>
+          <div class="settings-label">데이터 가져오기</div>
+          <div class="settings-desc">백업 JSON 복원</div>
+        </div>
+        <span style="font-size:18px;">📤</span>
+      </div>
+      <div class="settings-row" onclick="confirmResetAll()" style="cursor:pointer;">
+        <div>
+          <div class="settings-label" style="color:#dc2626;">전체 초기화</div>
+          <div class="settings-desc">모든 추천/추적 기록 삭제</div>
+        </div>
+        <span style="font-size:18px;">🗑</span>
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:20px;color:#94a3b8;font-size:11px;">
+      StockRadar v1.0 · 무료 PWA<br/>
+      DART · SEC EDGAR · Yahoo · Naver
+    </div>
+  </div>
+
+  <!-- TAB BAR -->
+  <div class="tab-bar">
+    <button class="tab active" data-view="today" onclick="switchView('today')">
+      <span class="ico">📡</span><span>오늘</span>
+    </button>
+    <button class="tab" data-view="tracking" onclick="switchView('tracking')">
+      <span class="ico">📈</span><span>추적</span>
+    </button>
+    <button class="tab" data-view="history" onclick="switchView('history')">
+      <span class="ico">📅</span><span>히스토리</span>
+    </button>
+    <button class="tab" data-view="settings" onclick="switchView('settings')">
+      <span class="ico">⚙️</span><span>설정</span>
+    </button>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-overlay" id="detailModal" onclick="if(event.target===this)closeModal('detailModal')">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modalTitle">-</div>
+        <div class="modal-subtitle" id="modalSubtitle">-</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('detailModal')">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- ALERT POPUP -->
+<div class="alert-pop" id="alertPop" onclick="dismissAlert()">
+  <div class="ico" id="alertIco">🚀</div>
+  <div class="body">
+    <div class="ttl" id="alertTtl">-</div>
+    <div class="desc" id="alertDesc">-</div>
+  </div>
+  <button class="close" onclick="event.stopPropagation();dismissAlert();">✕</button>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<input type="file" id="importFile" accept=".json" style="display:none;" onchange="handleImport(event)"/>
+
+<script src="app.js"></script>
+</body>
+</html>
