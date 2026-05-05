@@ -5,7 +5,7 @@
 // ============================================
 // 1. STATE & STORAGE
 // ============================================
-const STORE_KEY = 'stockradar_v1';
+const STORE_KEY = 'stockradar_v2';
 const DEFAULTS = {
   market: 'kr',
   view: 'today',
@@ -16,6 +16,11 @@ const DEFAULTS = {
     dartKey: '',
     workerUrl: 'https://ykh-stock-proxy.kyunghoyou.workers.dev',
     newsProxyUrl: 'https://ykh-news-proxy.kyunghoyou.workers.dev',
+    geminiKey: '',           // Gemini API 키 (선택, 무료)
+    useGemini: false,        // AI 분석 활성화
+    macroAlerts: true,       // 거시 지표 알림 (FOMC, 환율 등)
+    krWatchlist: [],         // 한국 관심종목 (종목코드)
+    usWatchlist: [],         // 미국 관심종목
   },
   recommendations: {},  // { 'YYYY-MM-DD': { kr: [{...}], us: [{...}] } }
   tracking: [],         // [{ ticker, name, market, addedDate, addedPrice, currentPrice, prices: [...], reason }]
@@ -214,44 +219,39 @@ async function fetchProxy(url, timeoutMs = 12000) {
   throw lastErr || new Error('all proxies failed');
 }
 
-// ---- 한국 뉴스: 네이버 금융 (allorigins 프록시) ----
+// ---- 한국 뉴스: 다중 RSS 피드 (한국 시장 강화) ----
 async function fetchKRNews() {
+  const FEEDS = [
+    { url: 'https://rss.hankyung.com/feed/economy.xml', src: '한경 경제' },
+    { url: 'https://rss.hankyung.com/feed/realestate.xml', src: '한경 부동산' },
+    { url: 'https://rss.hankyung.com/feed/it.xml', src: '한경 IT' },
+    { url: 'https://www.mk.co.kr/rss/30100041/', src: '매경 증권' },
+    { url: 'https://www.mk.co.kr/rss/50300009/', src: '매경 경제' },
+    { url: 'https://www.mk.co.kr/rss/50000001/', src: '매경 헤드라인' },
+    { url: 'https://www.mk.co.kr/rss/40300001/', src: '매경 기업' },
+  ];
   const items = [];
-  try {
-    // 한경 RSS (경제)
-    const txt = await fetchProxy('https://rss.hankyung.com/feed/economy.xml');
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(txt, 'text/xml');
-    const entries = xml.querySelectorAll('item');
-    entries.forEach(e => {
-      const title = e.querySelector('title')?.textContent || '';
-      const link = e.querySelector('link')?.textContent || '';
-      const pub = e.querySelector('pubDate')?.textContent || '';
-      items.push({
-        market: 'kr', source: '한경',
-        title, link, pubDate: pub,
-        publishedAt: pub ? new Date(pub).toISOString() : new Date().toISOString(),
+  for (const feed of FEEDS) {
+    try {
+      const txt = await fetchProxy(feed.url);
+      const xml = new DOMParser().parseFromString(txt, 'text/xml');
+      const entries = xml.querySelectorAll('item');
+      entries.forEach((e, idx) => {
+        if (idx > 30) return;
+        const title = e.querySelector('title')?.textContent || '';
+        const link = e.querySelector('link')?.textContent || '';
+        const pub = e.querySelector('pubDate')?.textContent || '';
+        const desc = e.querySelector('description')?.textContent || '';
+        if (!title) return;
+        items.push({
+          market: 'kr', source: feed.src,
+          title, link, summary: desc.replace(/<[^>]*>/g, '').substring(0, 200),
+          publishedAt: pub ? new Date(pub).toISOString() : new Date().toISOString(),
+        });
       });
-    });
-  } catch (e) {
-    console.warn('한경 RSS fail', e);
-  }
-  try {
-    // 매경 증권
-    const txt = await fetchProxy('https://www.mk.co.kr/rss/30100041/');
-    const xml = new DOMParser().parseFromString(txt, 'text/xml');
-    xml.querySelectorAll('item').forEach(e => {
-      const title = e.querySelector('title')?.textContent || '';
-      const link = e.querySelector('link')?.textContent || '';
-      const pub = e.querySelector('pubDate')?.textContent || '';
-      items.push({
-        market: 'kr', source: '매경',
-        title, link, pubDate: pub,
-        publishedAt: pub ? new Date(pub).toISOString() : new Date().toISOString(),
-      });
-    });
-  } catch (e) {
-    console.warn('매경 RSS fail', e);
+    } catch (e) {
+      console.warn(`KR RSS fail (${feed.src}):`, e.message);
+    }
   }
   return items;
 }
@@ -321,30 +321,247 @@ async function fetchUSFilings() {
   }
 }
 
-// ---- 미국 뉴스: Yahoo Finance ----
-async function fetchUSNews(tickers = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'TSLA', 'AMZN', 'META', 'AMD', 'NFLX', 'AVGO']) {
+// ---- 미국 뉴스: Yahoo Finance (기본 50+ 종목 모니터링) ----
+async function fetchUSNews(tickers = null) {
+  if (!tickers || tickers.length === 0) {
+    tickers = window.US_WATCHLIST_DEFAULT || ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'TSLA', 'AMZN', 'META', 'AMD', 'NFLX', 'AVGO'];
+  }
   const items = [];
-  for (const tk of tickers) {
-    try {
-      const txt = await fetchProxy(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${tk}&region=US&lang=en-US`);
-      const xml = new DOMParser().parseFromString(txt, 'text/xml');
-      xml.querySelectorAll('item').forEach((e, idx) => {
-        if (idx > 5) return;
-        const title = e.querySelector('title')?.textContent || '';
-        const link = e.querySelector('link')?.textContent || '';
-        const pub = e.querySelector('pubDate')?.textContent || '';
-        items.push({
-          market: 'us', source: 'Yahoo Finance',
-          ticker: tk,
-          title, link,
-          publishedAt: pub ? new Date(pub).toISOString() : new Date().toISOString(),
+  // 배치로 병렬 처리 (5개씩)
+  const batches = [];
+  for (let i = 0; i < tickers.length; i += 5) {
+    batches.push(tickers.slice(i, i + 5));
+  }
+  for (const batch of batches) {
+    await Promise.allSettled(batch.map(async tk => {
+      try {
+        const txt = await fetchProxy(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${tk}&region=US&lang=en-US`, 8000);
+        const xml = new DOMParser().parseFromString(txt, 'text/xml');
+        xml.querySelectorAll('item').forEach((e, idx) => {
+          if (idx > 5) return;
+          const title = e.querySelector('title')?.textContent || '';
+          const link = e.querySelector('link')?.textContent || '';
+          const pub = e.querySelector('pubDate')?.textContent || '';
+          if (!title) return;
+          items.push({
+            market: 'us', source: 'Yahoo Finance',
+            ticker: tk,
+            title, link,
+            publishedAt: pub ? new Date(pub).toISOString() : new Date().toISOString(),
+          });
         });
-      });
-    } catch (e) {
-      console.warn('Yahoo news fail', tk, e);
-    }
+      } catch (e) {
+        // 개별 종목 실패는 무시
+      }
+    }));
   }
   return items;
+}
+
+// ============================================
+// 5b. FINANCIAL DATA (재무 정보)
+// ============================================
+
+async function fetchFinancials(ticker, market = 'kr') {
+  const newsProxy = STATE.settings.newsProxyUrl;
+  if (!newsProxy) return null;
+
+  if (market === 'kr') {
+    // Naver Finance API로 한국 종목 재무 정보
+    try {
+      const url = `https://m.stock.naver.com/api/stock/${ticker}/integration`;
+      const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      // 응답에서 필요한 필드 추출
+      const stockEnd = j.stockEndType || 'KOSPI';
+      const total = j.totalInfos || [];
+      const findVal = (key) => {
+        const item = total.find(it => it.key === key || it.code === key);
+        return item ? item.value : null;
+      };
+      return {
+        marketCap: findVal('marketValue'),  // 시가총액
+        per: findVal('per') || findVal('PER'),
+        pbr: findVal('pbr') || findVal('PBR'),
+        eps: findVal('eps') || findVal('EPS'),
+        bps: findVal('bps') || findVal('BPS'),
+        dividendYield: findVal('dividendRatio') || findVal('dividend'),
+        high52w: findVal('high52'),
+        low52w: findVal('low52'),
+        volume: findVal('volume'),
+        market: stockEnd,
+      };
+    } catch (e) {
+      console.warn('KR financials fail', ticker, e.message);
+      return null;
+    }
+  } else {
+    // Yahoo Finance API로 미국 종목 재무 정보
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
+      const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      const meta = j?.chart?.result?.[0]?.meta;
+      if (!meta) return null;
+      return {
+        marketCap: null,
+        per: null,
+        currency: meta.currency,
+        currentPrice: meta.regularMarketPrice,
+        previousClose: meta.chartPreviousClose,
+        high52w: meta.fiftyTwoWeekHigh,
+        low52w: meta.fiftyTwoWeekLow,
+        volume: meta.regularMarketVolume,
+        avgVolume: meta.averageVolume,
+        exchange: meta.exchangeName,
+      };
+    } catch (e) {
+      console.warn('US financials fail', ticker, e.message);
+      return null;
+    }
+  }
+}
+
+// 일봉 차트 데이터 가져오기 (3개월)
+async function fetchChartData(ticker, market = 'kr', range = '3mo') {
+  const newsProxy = STATE.settings.newsProxyUrl;
+  if (!newsProxy) return null;
+
+  const symbol = market === 'kr' ? ticker + '.KS' : ticker;
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}`;
+    const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+    const r = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const result = j?.chart?.result?.[0];
+    if (!result) return null;
+    const ts = result.timestamp || [];
+    const quote = result.indicators?.quote?.[0] || {};
+    const closes = quote.close || [];
+    const highs = quote.high || [];
+    const lows = quote.low || [];
+    const opens = quote.open || [];
+    const volumes = quote.volume || [];
+    const data = [];
+    for (let i = 0; i < ts.length; i++) {
+      if (closes[i] == null) continue;
+      data.push({
+        ts: ts[i] * 1000,
+        date: new Date(ts[i] * 1000).toISOString().slice(0, 10),
+        o: opens[i], h: highs[i], l: lows[i], c: closes[i],
+        v: volumes[i] || 0,
+      });
+    }
+    return data;
+  } catch (e) {
+    console.warn('Chart data fail', ticker, e.message);
+    return null;
+  }
+}
+
+// ============================================
+// 5c. MACRO INDICATORS (거시 지표)
+// ============================================
+
+let _macroCache = null;
+let _macroCacheTime = 0;
+
+async function fetchMacroIndicators() {
+  // 5분 캐시
+  if (_macroCache && (Date.now() - _macroCacheTime) < 5 * 60 * 1000) {
+    return _macroCache;
+  }
+  const macro = {};
+  const newsProxy = STATE.settings.newsProxyUrl;
+
+  // 1) USD/KRW 환율
+  try {
+    const txt = await fetchProxy('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json', 5000);
+    const j = JSON.parse(txt);
+    macro.usdKrw = j?.usd?.krw;
+  } catch (e) {
+    console.warn('FX fail', e.message);
+  }
+
+  // 2) 미국 주요 지수 (S&P 500, Nasdaq, Dow)
+  if (newsProxy) {
+    const indices = [
+      { sym: '^GSPC', name: 'S&P 500' },
+      { sym: '^IXIC', name: 'Nasdaq' },
+      { sym: '^DJI', name: 'Dow' },
+      { sym: '^KS11', name: 'KOSPI' },
+      { sym: '^KQ11', name: 'KOSDAQ' },
+    ];
+    macro.indices = [];
+    await Promise.allSettled(indices.map(async ({ sym, name }) => {
+      try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`;
+        const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+        const r = await fetch(proxy, { signal: AbortSignal.timeout(5000) });
+        if (!r.ok) return;
+        const j = await r.json();
+        const meta = j?.chart?.result?.[0]?.meta;
+        if (meta?.regularMarketPrice) {
+          const change = ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose * 100);
+          macro.indices.push({
+            symbol: sym, name,
+            price: meta.regularMarketPrice,
+            change,
+          });
+        }
+      } catch (e) {}
+    }));
+  }
+
+  _macroCache = macro;
+  _macroCacheTime = Date.now();
+  return macro;
+}
+
+// ============================================
+// 5d. AI ANALYSIS (Gemini 무료, 선택)
+// ============================================
+
+async function analyzeWithGemini(text, lang = 'ko') {
+  const key = STATE.settings.geminiKey;
+  if (!key || !STATE.settings.useGemini) return null;
+  try {
+    const prompt = lang === 'ko'
+      ? `다음 한국 주식 관련 뉴스/공시를 분석하세요. JSON 형식으로 응답:\n{"impact":1-10 점수,"reason":"한 문장 핵심 분석","positives":["긍정 요인"],"negatives":["부정 요인"]}\n\n뉴스: ${text}`
+      : `Analyze this US stock news/filing. Respond in JSON:\n{"impact":1-10 score,"reason":"one sentence analysis (in Korean)","positives":["positives"],"negatives":["negatives"]}\n\nNews: ${text}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) {
+      console.warn('Gemini', r.status);
+      return null;
+    }
+    const j = await r.json();
+    const respText = j?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // JSON 추출
+    const m = respText.match(/\{[\s\S]*\}/);
+    if (m) {
+      try {
+        return JSON.parse(m[0]);
+      } catch (e) {}
+    }
+    return null;
+  } catch (e) {
+    console.warn('Gemini error', e.message);
+    return null;
+  }
 }
 
 // ============================================
@@ -414,28 +631,10 @@ async function fetchPrice(ticker, market = 'kr') {
 // 6. STOCK ANALYSIS & RECOMMENDATION
 // ============================================
 
-// 종목명 → 티커 매핑 (한국 주요 종목)
-const KR_NAME_TO_CODE = {
-  '삼성전자': '005930', 'SK하이닉스': '000660', 'LG에너지솔루션': '373220',
-  '삼성바이오로직스': '207940', '현대차': '005380', '기아': '000270',
-  'NAVER': '035420', '네이버': '035420', '카카오': '035720',
-  '셀트리온': '068270', 'POSCO홀딩스': '005490', 'LG화학': '051910',
-  '현대모비스': '012330', '삼성SDI': '006400', 'KB금융': '105560',
-  '신한지주': '055550', '하나금융지주': '086790', '에코프로': '086520',
-  '에코프로비엠': '247540', '한화에어로스페이스': '012450', '두산에너빌리티': '034020',
-  'HMM': '011200', '포스코퓨처엠': '003670', '삼성생명': '032830',
-  '카카오뱅크': '323410', '한미반도체': '042700', 'LG전자': '066570',
-  'SK이노베이션': '096770', '아모레퍼시픽': '090430', '크래프톤': '259960',
-};
-
-// 미국 회사명 추출 → 티커 매핑 (간단 케이스)
-const US_NAME_TO_TICKER = {
-  'apple': 'AAPL', 'microsoft': 'MSFT', 'nvidia': 'NVDA',
-  'tesla': 'TSLA', 'amazon': 'AMZN', 'alphabet': 'GOOGL', 'google': 'GOOGL',
-  'meta': 'META', 'facebook': 'META', 'netflix': 'NFLX',
-  'amd': 'AMD', 'intel': 'INTC', 'broadcom': 'AVGO',
-  'palantir': 'PLTR', 'oracle': 'ORCL', 'salesforce': 'CRM',
-};
+// 종목명 → 티커 매핑 (외부 파일에서 로드, kr_stocks.js / us_stocks.js)
+// window.KR_STOCKS 와 window.US_STOCKS 사용
+function getKRStocks() { return window.KR_STOCKS || {}; }
+function getUSStocks() { return window.US_STOCKS || {}; }
 
 // ETF 편입 정보 (대표 ETF)
 const KR_ETF = {
@@ -465,9 +664,17 @@ function getETFs(ticker, market) {
 }
 
 function extractTickerKR(text) {
-  // 한국어 회사명에서 종목코드 추출
-  for (const [name, code] of Object.entries(KR_NAME_TO_CODE)) {
-    if (text.includes(name)) return { ticker: code, name };
+  // window.extractAllKRTickers가 있으면 우선 사용 (외부 파일)
+  if (window.extractAllKRTickers) {
+    const found = window.extractAllKRTickers(text);
+    if (found.length > 0) return found[0];
+  }
+  // 기본 매핑 fallback
+  const stocks = getKRStocks();
+  // 긴 이름 우선 (정확도 향상)
+  const sortedNames = Object.keys(stocks).sort((a, b) => b.length - a.length);
+  for (const name of sortedNames) {
+    if (text.includes(name)) return { ticker: stocks[name], name };
   }
   // 6자리 숫자 직접 매칭
   const m = text.match(/\b(\d{6})\b/);
@@ -475,18 +682,26 @@ function extractTickerKR(text) {
   return null;
 }
 
+// 한 텍스트에서 여러 한국 종목 모두 추출
+function extractAllKRTickers(text) {
+  if (window.extractAllKRTickers) return window.extractAllKRTickers(text);
+  return [];
+}
+
 function extractTickerUS(text, knownTicker = null) {
-  if (knownTicker) {
-    // 회사명을 위에서 매핑 시도
-    for (const [name, ticker] of Object.entries(US_NAME_TO_TICKER)) {
-      if (text.toLowerCase().includes(name)) return { ticker, name: name.charAt(0).toUpperCase() + name.slice(1) };
+  if (window.extractUSTicker) {
+    const r = window.extractUSTicker(text);
+    if (r) return r;
+  }
+  const stocks = getUSStocks();
+  const lower = text.toLowerCase();
+  const sortedNames = Object.keys(stocks).sort((a, b) => b.length - a.length);
+  for (const name of sortedNames) {
+    if (lower.includes(name)) {
+      return { ticker: stocks[name], name: name.charAt(0).toUpperCase() + name.slice(1) };
     }
-    return { ticker: knownTicker, name: knownTicker };
   }
-  for (const [name, ticker] of Object.entries(US_NAME_TO_TICKER)) {
-    if (text.toLowerCase().includes(name)) return { ticker, name: name.charAt(0).toUpperCase() + name.slice(1) };
-  }
-  // SEC 형식: "Apple Inc"
+  if (knownTicker) return { ticker: knownTicker, name: knownTicker };
   const m = text.match(/- (.+?) \(\d{10}\)/);
   if (m) return { ticker: m[1].slice(0, 6).toUpperCase().replace(/\s/g, ''), name: m[1] };
   return null;
@@ -500,32 +715,42 @@ function aggregateByStock(items, market) {
     const text = `${item.title} ${item.summary || ''}`;
     const { score, matched } = analyzeImpact(text, lang);
 
-    let info;
+    let infos = [];
     if (market === 'kr') {
       // DART 공시는 직접 매핑됨
       if (item.stockCode) {
-        info = { ticker: item.stockCode, name: item.corpName };
+        infos = [{ ticker: item.stockCode, name: item.corpName }];
       } else {
-        info = extractTickerKR(item.title);
+        // 한 뉴스에 여러 종목 언급되면 모두 추출
+        infos = extractAllKRTickers(text);
+        if (infos.length === 0) {
+          const single = extractTickerKR(text);
+          if (single) infos = [single];
+        }
       }
     } else {
-      info = extractTickerUS(text, item.ticker);
+      const info = extractTickerUS(text, item.ticker);
+      if (info) infos = [info];
     }
 
-    if (!info || !info.ticker) continue;
-
-    const key = info.ticker;
-    if (!stocks[key]) {
-      stocks[key] = {
-        ticker: key, name: info.name, market,
-        totalScore: 0, items: [], maxImpact: 0, latestDate: null,
-      };
-    }
-    stocks[key].items.push({ ...item, score, matched });
-    stocks[key].totalScore += Math.max(0, score - 5);  // 5점 이상만 누적
-    stocks[key].maxImpact = Math.max(stocks[key].maxImpact, score);
-    if (!stocks[key].latestDate || item.publishedAt > stocks[key].latestDate) {
-      stocks[key].latestDate = item.publishedAt;
+    for (const info of infos) {
+      if (!info || !info.ticker) continue;
+      const key = info.ticker;
+      if (!stocks[key]) {
+        stocks[key] = {
+          ticker: key, name: info.name, market,
+          totalScore: 0, items: [], maxImpact: 0, latestDate: null,
+        };
+      }
+      // 같은 뉴스가 같은 종목에 중복 추가되지 않도록
+      if (!stocks[key].items.find(it => it.link === item.link)) {
+        stocks[key].items.push({ ...item, score, matched });
+        stocks[key].totalScore += Math.max(0, score - 5);
+        stocks[key].maxImpact = Math.max(stocks[key].maxImpact, score);
+        if (!stocks[key].latestDate || item.publishedAt > stocks[key].latestDate) {
+          stocks[key].latestDate = item.publishedAt;
+        }
+      }
     }
   }
   return Object.values(stocks)
@@ -720,30 +945,96 @@ async function openDetail(ticker, market) {
   const trackBtnLbl = tracked ? '✅ 추적중' : '📌 추적 시작';
 
   // 가격 정보
-  document.getElementById('modalBody').innerHTML = `
-    <div class="loading"><div class="spinner"></div>시세 로딩중...</div>
-  `;
-
+  document.getElementById('modalBody').innerHTML = `<div class="loading"><div class="spinner"></div>분석중...</div>`;
   document.getElementById('detailModal').classList.add('active');
 
-  // 가격 가져오기
-  const priceData = await fetchPrice(ticker, market);
+  // 병렬로 모든 데이터 가져오기
+  const [priceData, financials, chartData] = await Promise.all([
+    fetchPrice(ticker, market),
+    fetchFinancials(ticker, market),
+    fetchChartData(ticker, market, '3mo'),
+  ]);
   const etfs = getETFs(ticker, market);
 
+  // 가격 정보 카드
   let priceHtml = '<div class="empty" style="padding:14px;"><div class="desc">시세 가져오기 실패</div></div>';
+  let curPrice = null, prevPrice = null, currency = 'KRW';
   if (priceData) {
-    const change = ((priceData.price - priceData.prev) / priceData.prev * 100);
+    curPrice = priceData.price;
+    prevPrice = priceData.prev;
+    currency = priceData.currency;
+    const change = ((curPrice - prevPrice) / prevPrice * 100);
     const cls = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
-    const sym = priceData.currency === 'KRW' ? '₩' : '$';
+    const sym = currency === 'KRW' ? '₩' : '$';
     priceHtml = `
       <div class="fin-grid">
         <div class="fin-cell">
           <div class="lbl">현재가</div>
-          <div class="val">${sym}${fmtNum(priceData.price, priceData.currency === 'KRW' ? 0 : 2)}</div>
+          <div class="val">${sym}${fmtNum(curPrice, currency === 'KRW' ? 0 : 2)}</div>
         </div>
         <div class="fin-cell">
           <div class="lbl">전일 대비</div>
           <div class="val ${cls}">${fmtPct(change)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 재무 정보 카드
+  let finHtml = '';
+  if (financials) {
+    const sym = currency === 'KRW' ? '₩' : '$';
+    const cells = [];
+    if (financials.marketCap) cells.push(`<div class="fin-cell"><div class="lbl">시가총액</div><div class="val">${fmtMarketCap(financials.marketCap, currency)}</div></div>`);
+    if (financials.per != null) cells.push(`<div class="fin-cell"><div class="lbl">PER</div><div class="val">${fmtNum(financials.per, 2)}</div></div>`);
+    if (financials.pbr != null) cells.push(`<div class="fin-cell"><div class="lbl">PBR</div><div class="val">${fmtNum(financials.pbr, 2)}</div></div>`);
+    if (financials.dividendYield != null) cells.push(`<div class="fin-cell"><div class="lbl">배당수익률</div><div class="val">${fmtNum(financials.dividendYield, 2)}%</div></div>`);
+    if (financials.high52w) cells.push(`<div class="fin-cell"><div class="lbl">52주 최고</div><div class="val">${sym}${fmtNum(financials.high52w, currency === 'KRW' ? 0 : 2)}</div></div>`);
+    if (financials.low52w) cells.push(`<div class="fin-cell"><div class="lbl">52주 최저</div><div class="val">${sym}${fmtNum(financials.low52w, currency === 'KRW' ? 0 : 2)}</div></div>`);
+    if (financials.volume) cells.push(`<div class="fin-cell"><div class="lbl">거래량</div><div class="val">${fmtVolume(financials.volume)}</div></div>`);
+    if (financials.exchange) cells.push(`<div class="fin-cell"><div class="lbl">거래소</div><div class="val" style="font-size:11px;">${financials.exchange}</div></div>`);
+    if (cells.length > 0) {
+      finHtml = `
+        <div class="detail-section">
+          <div class="detail-section-title">📊 재무 정보</div>
+          <div class="fin-grid">${cells.join('')}</div>
+        </div>
+      `;
+    }
+  }
+
+  // 차트 (3개월 일봉)
+  let chartHtml = '';
+  if (chartData && chartData.length > 5) {
+    const W = 320, H = 100;
+    const closes = chartData.map(d => d.c);
+    const min = Math.min(...closes), max = Math.max(...closes), range = max - min || 1;
+    const points = chartData.map((d, i) => {
+      const x = (i / (chartData.length - 1)) * W;
+      const y = H - ((d.c - min) / range) * (H - 10) - 5;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const startC = chartData[0].c, endC = chartData[chartData.length - 1].c;
+    const trend = ((endC - startC) / startC * 100);
+    const lineColor = trend >= 0 ? '#dc2626' : '#2563eb';
+    chartHtml = `
+      <div class="detail-section">
+        <div class="detail-section-title">📈 3개월 추이 ${trend >= 0 ? '📈' : '📉'} ${fmtPct(trend)}</div>
+        <div style="background:#f8fafc;border-radius:10px;padding:10px;border:1px solid #f1f5f9;">
+          <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100px;display:block;">
+            <defs>
+              <linearGradient id="chartGrad" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.2"/>
+                <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <polyline points="${points}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
+            <polygon points="0,${H} ${points} ${W},${H}" fill="url(#chartGrad)"/>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:#6b7280;margin-top:6px;font-family:'DM Mono',monospace;">
+            <span>${chartData[0].date}</span>
+            <span>${chartData[chartData.length - 1].date}</span>
+          </div>
         </div>
       </div>
     `;
@@ -770,7 +1061,34 @@ async function openDetail(ticker, market) {
     ? etfs.map(([name, pct]) => `<span class="etf-chip">${escapeHtml(name)} <span class="pct">${pct}%</span></span>`).join('')
     : '<div style="color:#94a3b8;font-size:12px;">ETF 편입 정보 없음</div>';
 
-  // 추천 사유 분석 (키워드 기반 텍스트)
+  // AI 분석 (Gemini가 켜져있으면)
+  let aiAnalysisHtml = '';
+  if (STATE.settings.useGemini && STATE.settings.geminiKey && stock.topNews[0]) {
+    aiAnalysisHtml = `
+      <div class="detail-section">
+        <div class="detail-section-title">🤖 AI 정밀 분석 (Gemini)</div>
+        <div id="aiAnalysisBox" class="analysis-text" style="font-size:12px;">분석중...</div>
+      </div>
+    `;
+    // 비동기로 AI 분석 실행
+    setTimeout(async () => {
+      const newsText = stock.topNews.slice(0, 3).map(n => n.title).join('\n');
+      const aiResult = await analyzeWithGemini(newsText, market === 'kr' ? 'ko' : 'en');
+      const box = document.getElementById('aiAnalysisBox');
+      if (box && aiResult) {
+        let html = '';
+        if (aiResult.impact) html += `📊 <strong>AI 임팩트:</strong> ${aiResult.impact}/10<br>`;
+        if (aiResult.reason) html += `💡 <strong>분석:</strong> ${escapeHtml(aiResult.reason)}<br>`;
+        if (aiResult.positives?.length) html += `📈 <strong>긍정:</strong> ${aiResult.positives.map(escapeHtml).join(', ')}<br>`;
+        if (aiResult.negatives?.length) html += `📉 <strong>부정:</strong> ${aiResult.negatives.map(escapeHtml).join(', ')}`;
+        box.innerHTML = html || '분석 결과 없음';
+      } else if (box) {
+        box.innerHTML = '<span style="color:#94a3b8;">AI 분석 실패 (API 키 확인 또는 네트워크)</span>';
+      }
+    }, 100);
+  }
+
+  // 추천 사유 (키워드 기반)
   const allMatched = new Set();
   stock.topNews.forEach(n => (n.matched || []).forEach(m => allMatched.add(m)));
   const positives = [...allMatched].filter(m => m.startsWith('+')).map(m => m.slice(1));
@@ -779,7 +1097,6 @@ async function openDetail(ticker, market) {
   let analysisText = '';
   if (positives.length) analysisText += `📈 <strong>긍정 신호:</strong> ${positives.join(', ')}\n\n`;
   if (negatives.length) analysisText += `📉 <strong>부정 신호:</strong> ${negatives.join(', ')}\n\n`;
-
   if (stock.maxImpact >= 8) {
     analysisText += `💡 <strong>요약:</strong> 매우 강한 긍정 시그널. 단기 모멘텀 가능성 높음.`;
   } else if (stock.maxImpact >= 6) {
@@ -794,10 +1111,16 @@ async function openDetail(ticker, market) {
       ${priceHtml}
     </div>
 
+    ${chartHtml}
+
+    ${finHtml}
+
     <div class="detail-section">
-      <div class="detail-section-title">🤖 AI 분석</div>
+      <div class="detail-section-title">🔍 키워드 분석</div>
       <div class="analysis-text">${analysisText.replace(/\n/g, '<br>')}</div>
     </div>
+
+    ${aiAnalysisHtml}
 
     <div class="detail-section">
       <div class="detail-section-title">🏷️ ETF 편입 정보</div>
@@ -816,6 +1139,30 @@ async function openDetail(ticker, market) {
       <button class="action-btn secondary" onclick="closeModal('detailModal')">닫기</button>
     </div>
   `;
+}
+
+// 헬퍼 함수
+function fmtMarketCap(v, currency = 'KRW') {
+  const n = Number(v);
+  if (isNaN(n)) return '-';
+  if (currency === 'KRW') {
+    if (n >= 1e12) return `${(n / 1e12).toFixed(1)}조원`;
+    if (n >= 1e8) return `${(n / 1e8).toFixed(0)}억원`;
+    return `${(n / 1e4).toFixed(0)}만원`;
+  } else {
+    if (n >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;
+    if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+    if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+    return `$${n.toLocaleString()}`;
+  }
+}
+
+function fmtVolume(v) {
+  const n = Number(v);
+  if (isNaN(n)) return '-';
+  if (n >= 1e8) return `${(n / 1e8).toFixed(1)}억주`;
+  if (n >= 1e4) return `${(n / 1e4).toFixed(0)}만주`;
+  return n.toLocaleString();
 }
 
 function closeModal(id) {
@@ -1137,6 +1484,9 @@ function loadSettings() {
   document.getElementById('dartKey').value = STATE.settings.dartKey || '';
   document.getElementById('workerUrl').value = STATE.settings.workerUrl || '';
   document.getElementById('newsProxyUrl').value = STATE.settings.newsProxyUrl || '';
+  if (document.getElementById('geminiKey')) document.getElementById('geminiKey').value = STATE.settings.geminiKey || '';
+  if (document.getElementById('useGemini')) document.getElementById('useGemini').checked = STATE.settings.useGemini || false;
+  if (document.getElementById('macroAlerts')) document.getElementById('macroAlerts').checked = STATE.settings.macroAlerts !== false;
 }
 
 function saveSettings() {
@@ -1146,6 +1496,9 @@ function saveSettings() {
   STATE.settings.dartKey = document.getElementById('dartKey').value.trim();
   STATE.settings.workerUrl = document.getElementById('workerUrl').value.trim();
   STATE.settings.newsProxyUrl = document.getElementById('newsProxyUrl').value.trim();
+  if (document.getElementById('geminiKey')) STATE.settings.geminiKey = document.getElementById('geminiKey').value.trim();
+  if (document.getElementById('useGemini')) STATE.settings.useGemini = document.getElementById('useGemini').checked;
+  if (document.getElementById('macroAlerts')) STATE.settings.macroAlerts = document.getElementById('macroAlerts').checked;
   saveState();
   setupAutoRefresh();
   showToast('설정 저장됨');
@@ -1234,8 +1587,65 @@ function refreshData() {
   else if (STATE.view === 'history') renderHistory();
 }
 
-function openMarketStatus() {
-  showToast('시장 현황 기능은 v1.1에서 추가 예정');
+async function openMarketStatus() {
+  document.getElementById('modalTitle').innerHTML = '📊 시장 현황';
+  document.getElementById('modalSubtitle').innerHTML = '실시간 거시 지표';
+  document.getElementById('modalBody').innerHTML = '<div class="loading"><div class="spinner"></div>거시 지표 로딩중...</div>';
+  document.getElementById('detailModal').classList.add('active');
+
+  const macro = await fetchMacroIndicators();
+
+  let indicesHtml = '';
+  if (macro.indices && macro.indices.length > 0) {
+    indicesHtml = `
+      <div class="detail-section">
+        <div class="detail-section-title">📈 주요 지수</div>
+        <div class="fin-grid">
+          ${macro.indices.map(idx => {
+            const cls = idx.change > 0 ? 'up' : idx.change < 0 ? 'down' : 'flat';
+            return `
+              <div class="fin-cell">
+                <div class="lbl">${escapeHtml(idx.name)}</div>
+                <div class="val">${fmtNum(idx.price, 2)}</div>
+                <div style="font-size:11px;font-family:'DM Mono',monospace;font-weight:600;" class="${cls}">${fmtPct(idx.change)}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  let fxHtml = '';
+  if (macro.usdKrw) {
+    fxHtml = `
+      <div class="detail-section">
+        <div class="detail-section-title">💱 환율</div>
+        <div class="fin-cell" style="margin-bottom:8px;">
+          <div class="lbl">USD/KRW</div>
+          <div class="val">₩${fmtNum(macro.usdKrw, 2)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  document.getElementById('modalBody').innerHTML = `
+    ${indicesHtml}
+    ${fxHtml}
+    <div class="detail-section">
+      <div class="detail-section-title">📅 다음 주요 일정</div>
+      <div style="font-size:12px;color:#475569;line-height:1.7;background:#f8fafc;padding:12px;border-radius:10px;">
+        💡 거시 일정 자동 수집은 v1.1에서 추가 예정입니다.<br>
+        주요 일정 수동 확인:<br>
+        - <a href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" target="_blank" style="color:#2563eb;">FOMC 일정</a><br>
+        - <a href="https://www.bok.or.kr/portal/main/contents.do?menuNo=200459" target="_blank" style="color:#2563eb;">한은 금통위</a><br>
+        - <a href="https://kr.investing.com/economic-calendar/" target="_blank" style="color:#2563eb;">투자 캘린더</a>
+      </div>
+    </div>
+    <div class="action-row" style="padding:0;margin-top:8px;">
+      <button class="action-btn secondary" onclick="closeModal('detailModal')">닫기</button>
+    </div>
+  `;
 }
 
 // ============================================
