@@ -762,33 +762,57 @@ async function fetchMacroIndicators() {
 // ============================================
 
 async function analyzeWithGemini(text, lang = 'ko') {
+  console.log('[Gemini] 🚀 분석 시작 요청 (text 길이:', text?.length || 0, ', 언어:', lang, ')');
   const key = STATE.settings.geminiKey;
+  console.log('[Gemini] 키 존재:', !!key, '(길이:', key?.length || 0, ')');
+  console.log('[Gemini] useGemini 설정:', STATE.settings.useGemini);
   if (!key) {
-    console.warn('[Gemini] API 키 없음');
+    console.warn('[Gemini] ❌ API 키 없음');
     return null;
   }
   if (!STATE.settings.useGemini) {
-    console.warn('[Gemini] AI 분석 비활성화됨 (설정에서 켜기)');
+    console.warn('[Gemini] ❌ AI 분석 비활성화됨 (설정에서 켜기)');
     return null;
   }
   try {
     const prompt = lang === 'ko'
-      ? `다음 한국 주식 관련 뉴스/공시를 분석하세요. JSON 형식으로 응답:\n{"impact":1-10 점수,"reason":"한 문장 핵심 분석","positives":["긍정 요인"],"negatives":["부정 요인"]}\n\n뉴스: ${text}`
-      : `Analyze this US stock news/filing. Respond in JSON:\n{"impact":1-10 score,"reason":"one sentence analysis (in Korean)","positives":["positives"],"negatives":["negatives"]}\n\nNews: ${text}`;
+      ? `한국 주식 관련 다음 뉴스/공시를 분석하고 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 절대 포함하지 마세요.
+
+{"impact": 1-10 사이 정수, "reason": "한 문장 핵심 분석", "positives": ["긍정 요인 1", "긍정 요인 2"], "negatives": ["부정 요인 1"]}
+
+뉴스: ${text}`
+      : `Analyze this US stock news/filing. Respond ONLY in this exact JSON format. Do NOT include any other text.
+
+{"impact": integer 1-10, "reason": "one sentence analysis in Korean", "positives": ["positive 1", "positive 2"], "negatives": ["negative 1"]}
+
+News: ${text}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 500,
+          responseMimeType: 'application/json',  // 🔑 JSON 강제
+          responseSchema: {
+            type: 'object',
+            properties: {
+              impact: { type: 'integer' },
+              reason: { type: 'string' },
+              positives: { type: 'array', items: { type: 'string' } },
+              negatives: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['impact', 'reason'],
+          },
+        },
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
     });
     if (!r.ok) {
       const errText = await r.text().catch(() => '');
       console.error(`[Gemini] HTTP ${r.status}:`, errText.substring(0, 300));
-      // 상세 에러 메시지 파싱
       try {
         const errJson = JSON.parse(errText);
         const msg = errJson?.error?.message || `HTTP ${r.status}`;
@@ -799,18 +823,29 @@ async function analyzeWithGemini(text, lang = 'ko') {
     const j = await r.json();
     const respText = j?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     if (!respText) {
-      console.warn('[Gemini] 빈 응답');
+      console.warn('[Gemini] 빈 응답', j);
       return null;
     }
-    // JSON 추출
-    const m = respText.match(/\{[\s\S]*\}/);
-    if (m) {
-      try {
-        const parsed = JSON.parse(m[0]);
-        console.log('[Gemini] ✅ 분석 성공:', parsed.impact, '/', 10);
-        return parsed;
-      } catch (e) {
-        console.warn('[Gemini] JSON 파싱 실패:', m[0].substring(0, 100));
+    console.log('[Gemini] 원본 응답:', respText.substring(0, 200));
+
+    // responseMimeType: 'application/json' 사용 시 응답이 바로 JSON 문자열
+    try {
+      const parsed = JSON.parse(respText);
+      console.log('[Gemini] ✅ 분석 성공:', parsed.impact, '/', 10);
+      return parsed;
+    } catch (e) {
+      // 폴백: JSON 부분 추출 시도
+      const m = respText.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          const parsed = JSON.parse(m[0]);
+          console.log('[Gemini] ✅ 분석 성공 (폴백):', parsed.impact, '/', 10);
+          return parsed;
+        } catch (e2) {
+          console.warn('[Gemini] JSON 파싱 실패:', m[0].substring(0, 100));
+        }
+      } else {
+        console.warn('[Gemini] JSON 추출 실패. 원본:', respText.substring(0, 200));
       }
     }
     return null;
@@ -1490,7 +1525,13 @@ async function openDetail(ticker, market) {
 
   // AI 분석 (Gemini가 켜져있으면)
   let aiAnalysisHtml = '';
+  console.log('[모달] AI 분석 조건 체크:',
+    'useGemini=', STATE.settings.useGemini,
+    'key=', !!STATE.settings.geminiKey,
+    'topNews=', stock.topNews?.length || 0
+  );
   if (STATE.settings.useGemini && STATE.settings.geminiKey && stock.topNews[0]) {
+    console.log('[모달] ✅ AI 분석 실행 예정');
     aiAnalysisHtml = `
       <div class="detail-section">
         <div class="detail-section-title">🤖 AI 정밀 분석 (Gemini)</div>
@@ -1499,8 +1540,10 @@ async function openDetail(ticker, market) {
     `;
     // 비동기로 AI 분석 실행
     setTimeout(async () => {
+      console.log('[모달] AI 분석 함수 호출 시도');
       const newsText = stock.topNews.slice(0, 3).map(n => n.title).join('\n');
       const aiResult = await analyzeWithGemini(newsText, market === 'kr' ? 'ko' : 'en');
+      console.log('[모달] AI 분석 결과:', aiResult);
       const box = document.getElementById('aiAnalysisBox');
       if (box && aiResult) {
         let html = '';
@@ -1513,6 +1556,8 @@ async function openDetail(ticker, market) {
         box.innerHTML = '<span style="color:#94a3b8;">AI 분석 실패 (API 키 확인 또는 네트워크)</span>';
       }
     }, 100);
+  } else {
+    console.warn('[모달] ❌ AI 분석 조건 불충족');
   }
 
   // 신선도 종합 정보 카드
