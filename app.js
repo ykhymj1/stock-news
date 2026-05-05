@@ -763,7 +763,14 @@ async function fetchMacroIndicators() {
 
 async function analyzeWithGemini(text, lang = 'ko') {
   const key = STATE.settings.geminiKey;
-  if (!key || !STATE.settings.useGemini) return null;
+  if (!key) {
+    console.warn('[Gemini] API 키 없음');
+    return null;
+  }
+  if (!STATE.settings.useGemini) {
+    console.warn('[Gemini] AI 분석 비활성화됨 (설정에서 켜기)');
+    return null;
+  }
   try {
     const prompt = lang === 'ko'
       ? `다음 한국 주식 관련 뉴스/공시를 분석하세요. JSON 형식으로 응답:\n{"impact":1-10 점수,"reason":"한 문장 핵심 분석","positives":["긍정 요인"],"negatives":["부정 요인"]}\n\n뉴스: ${text}`
@@ -779,21 +786,36 @@ async function analyzeWithGemini(text, lang = 'ko') {
       signal: AbortSignal.timeout(15000),
     });
     if (!r.ok) {
-      console.warn('Gemini', r.status);
+      const errText = await r.text().catch(() => '');
+      console.error(`[Gemini] HTTP ${r.status}:`, errText.substring(0, 300));
+      // 상세 에러 메시지 파싱
+      try {
+        const errJson = JSON.parse(errText);
+        const msg = errJson?.error?.message || `HTTP ${r.status}`;
+        console.error(`[Gemini] ${msg}`);
+      } catch (e) {}
       return null;
     }
     const j = await r.json();
     const respText = j?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!respText) {
+      console.warn('[Gemini] 빈 응답');
+      return null;
+    }
     // JSON 추출
     const m = respText.match(/\{[\s\S]*\}/);
     if (m) {
       try {
-        return JSON.parse(m[0]);
-      } catch (e) {}
+        const parsed = JSON.parse(m[0]);
+        console.log('[Gemini] ✅ 분석 성공:', parsed.impact, '/', 10);
+        return parsed;
+      } catch (e) {
+        console.warn('[Gemini] JSON 파싱 실패:', m[0].substring(0, 100));
+      }
     }
     return null;
   } catch (e) {
-    console.warn('Gemini error', e.message);
+    console.error('[Gemini] 예외:', e.message);
     return null;
   }
 }
@@ -933,70 +955,18 @@ function getETFs(ticker, market) {
   return getETFsFromHardcoded(ticker, market);
 }
 
-// 네이버 금융에서 ETF 편입 정보 가져오기 (한국 종목만)
+// 네이버 금융에서 ETF 편입 정보 가져오기 - 비활성화됨
+// (정확한 공식 API 엔드포인트가 확인되지 않아 404 에러 발생)
+// 하드코딩 데이터를 사용 (KR_ETF, US_ETF)
 async function fetchETFsFromNaver(ticker, market = 'kr') {
-  if (market !== 'kr') return null;
-  const newsProxy = STATE.settings.newsProxyUrl;
-  if (!newsProxy) return null;
-
-  try {
-    // 네이버 금융 종목 페이지에서 ETF 정보 추출
-    // m.stock.naver.com 의 종목 상세 정보 API 사용
-    const url = `https://m.stock.naver.com/api/stock/${ticker}/etf`;
-    const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
-    const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const j = await r.json();
-
-    // 다양한 응답 형식 처리
-    let etfList = [];
-    if (Array.isArray(j)) etfList = j;
-    else if (Array.isArray(j?.etfs)) etfList = j.etfs;
-    else if (Array.isArray(j?.list)) etfList = j.list;
-    else if (Array.isArray(j?.items)) etfList = j.items;
-    else if (Array.isArray(j?.data)) etfList = j.data;
-
-    // ETF 정보 정규화
-    const result = etfList
-      .map(item => {
-        const name = item.itemName || item.name || item.etfName || item.title;
-        const ratio = parseFloat(item.weight || item.ratio || item.percentage || item.holdingRate || item.composition || 0);
-        if (!name || isNaN(ratio) || ratio <= 0) return null;
-        return [name, parseFloat(ratio.toFixed(2))];
-      })
-      .filter(x => x !== null)
-      .sort((a, b) => b[1] - a[1])  // 비중 큰 순
-      .slice(0, 15);  // 상위 15개
-
-    if (result.length > 0) {
-      // 캐시에 저장 (24시간)
-      const cache = loadETFCache();
-      cache[`${market}_${ticker}`] = { ts: Date.now(), etfs: result };
-      saveETFCache();
-      return result;
-    }
-    return null;
-  } catch (e) {
-    console.warn('Naver ETF fetch fail', ticker, e.message);
-    return null;
-  }
+  // TODO: 정확한 네이버 API 엔드포인트 확인되면 활성화
+  return null;
 }
 
-// 비동기 ETF 가져오기 + UI 업데이트 (상세 모달 열렸을 때 호출)
+// 비동기 ETF 가져오기 (현재는 비활성화)
 async function fetchAndUpdateETFs(ticker, market) {
-  const etfs = await fetchETFsFromNaver(ticker, market);
-  if (etfs && etfs.length > 0) {
-    // 화면 업데이트
-    const container = document.getElementById('etfContainer');
-    if (container) {
-      container.innerHTML = etfs.map(([name, pct]) =>
-        `<span class="etf-chip">${escapeHtml(name)} <span class="pct">${pct}%</span></span>`
-      ).join('');
-      // 출처 표시
-      const titleEl = document.getElementById('etfSectionTitle');
-      if (titleEl) titleEl.innerHTML = `🏷️ ETF 편입 정보 <span style="font-size:9px;color:#16a34a;font-weight:600;">· 네이버 실시간</span>`;
-    }
-  }
+  // 비활성화: 네이버 API 엔드포인트가 확인되지 않음
+  return;
 }
 
 function extractTickerKR(text) {
@@ -1516,7 +1486,7 @@ async function openDetail(ticker, market) {
 
   const etfHtml = etfs.length
     ? etfs.map(([name, pct]) => `<span class="etf-chip">${escapeHtml(name)} <span class="pct">${pct}%</span></span>`).join('')
-    : '<div style="color:#94a3b8;font-size:12px;">로딩중... 또는 ETF 편입 정보 없음</div>';
+    : '<div style="color:#94a3b8;font-size:12px;">📌 등록된 ETF 편입 정보 없음 (대형주 위주로 데이터 보유)</div>';
 
   // AI 분석 (Gemini가 켜져있으면)
   let aiAnalysisHtml = '';
