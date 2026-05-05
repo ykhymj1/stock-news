@@ -3,8 +3,8 @@ const CACHE = 'stockradar-v3';
 const FILES = [
   './index.html', './app.js', './kr_stocks.js', './us_stocks.js', './manifest.json',
   './favicon.ico',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png',
-  './icons/icon-32.png', './icons/icon-16.png',
+  './icon-192.png', './icon-512.png', './icon-180.png',
+  './icon-32.png', './icon-16.png',
 ];
 
 self.addEventListener('install', e => {
