@@ -1,6 +1,11 @@
-// StockRadar Service Worker v2
-const CACHE = 'stockradar-v2';
-const FILES = ['./index.html', './app.js', './kr_stocks.js', './us_stocks.js', './manifest.json'];
+// StockRadar Service Worker v3
+const CACHE = 'stockradar-v3';
+const FILES = [
+  './index.html', './app.js', './kr_stocks.js', './us_stocks.js', './manifest.json',
+  './favicon.ico',
+  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png',
+  './icons/icon-32.png', './icons/icon-16.png',
+];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).catch(() => {}));
