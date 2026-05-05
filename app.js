@@ -28,6 +28,7 @@ const DEFAULTS = {
   recommendations: {},  // { 'YYYY-MM-DD': { kr: [{...}], us: [{...}] } }
   tracking: [],         // [{ ticker, name, market, addedDate, addedPrice, currentPrice, prices: [...], reason }]
   alertsSeen: [],       // 이미 알림 표시한 추천 ID
+  fingerprints: {},     // { 'fingerprint_hash': { firstSeen: ISO, count: N, ticker, keyword } } - 재탕 감지용
 };
 
 let STATE = loadState();
@@ -294,6 +295,113 @@ function impactEmoji(score) {
   if (score === 5) return '⚪';
   if (score >= 3) return '🔴';
   return '💥';
+}
+
+// ============================================
+// 3b. FRESHNESS TRACKING (재탕 감지)
+// ============================================
+
+// 종목+핵심키워드 조합을 fingerprint로 만듦
+function makeFingerprint(ticker, matched) {
+  const keys = (matched || [])
+    .map(m => m.replace(/^[+\-]/, ''))  // +/- 제거
+    .filter(k => k && k.length > 0)
+    .sort()
+    .slice(0, 3)  // 상위 3개만
+    .join('|');
+  return `${ticker}::${keys}`;
+}
+
+// 뉴스 제목들을 정규화 (유사 뉴스 그룹화용)
+function normalizeTitle(title) {
+  return (title || '')
+    .toLowerCase()
+    .replace(/[^\w가-힣\s]/g, '')  // 특수문자 제거
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(w => w.length > 1)
+    .sort()
+    .slice(0, 8)
+    .join(' ');
+}
+
+// 신선도 등급 계산 (일 단위)
+function calcFreshness(firstSeenISO, currentISO = null) {
+  const now = currentISO ? new Date(currentISO) : new Date();
+  const first = new Date(firstSeenISO);
+  const days = (now - first) / (24 * 60 * 60 * 1000);
+
+  if (days < 0.04) return { level: 'new', label: '✨ NEW', daysAgo: 0, penalty: 0 };  // 1시간 이내
+  if (days < 1) return { level: 'fresh', label: '🆕 신선', daysAgo: Math.floor(days * 24) + '시간', penalty: 0 };
+  if (days < 3) return { level: 'recent', label: '🔄 최근', daysAgo: Math.floor(days) + '일', penalty: 1 };
+  if (days < 7) return { level: 'old', label: '⏰ 식상', daysAgo: Math.floor(days) + '일', penalty: 2 };
+  return { level: 'stale', label: '🗄️ 오래됨', daysAgo: Math.floor(days) + '일', penalty: 3 };
+}
+
+// fingerprint 등록 + 첫 발견 시간 반환
+function registerFingerprint(ticker, matched, currentISO) {
+  const fp = makeFingerprint(ticker, matched);
+  if (!STATE.fingerprints) STATE.fingerprints = {};
+
+  if (STATE.fingerprints[fp]) {
+    // 기존 fingerprint - 카운트 증가
+    STATE.fingerprints[fp].count = (STATE.fingerprints[fp].count || 1) + 1;
+    STATE.fingerprints[fp].lastSeen = currentISO;
+    return STATE.fingerprints[fp];
+  } else {
+    // 새 fingerprint
+    STATE.fingerprints[fp] = {
+      firstSeen: currentISO,
+      lastSeen: currentISO,
+      count: 1,
+      ticker,
+      keyword: fp.split('::')[1],
+    };
+    return STATE.fingerprints[fp];
+  }
+}
+
+// 오래된 fingerprint 정리 (30일 초과 삭제)
+function cleanupFingerprints() {
+  if (!STATE.fingerprints) return;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  let removed = 0;
+  for (const fp of Object.keys(STATE.fingerprints)) {
+    const data = STATE.fingerprints[fp];
+    if (new Date(data.lastSeen || data.firstSeen) < cutoff) {
+      delete STATE.fingerprints[fp];
+      removed++;
+    }
+  }
+  if (removed > 0) console.log(`🧹 오래된 fingerprint ${removed}개 정리`);
+}
+
+// 유사 뉴스 그룹화: 같은 종목에 대한 비슷한 뉴스들을 묶고 가장 빠른 시간 찾기
+function groupSimilarNews(items) {
+  const groups = {};
+  for (const item of items) {
+    const norm = normalizeTitle(item.title);
+    if (!norm) continue;
+    if (!groups[norm]) {
+      groups[norm] = [];
+    }
+    groups[norm].push(item);
+  }
+  // 각 그룹에서 가장 오래된 (첫 보도) 시간 추출
+  const result = {};
+  for (const [norm, group] of Object.entries(groups)) {
+    if (group.length < 2) continue;  // 1개짜리는 그룹 아님
+    group.sort((a, b) => new Date(a.publishedAt) - new Date(b.publishedAt));
+    result[norm] = {
+      firstReportedAt: group[0].publishedAt,
+      firstSource: group[0].source,
+      count: group.length,
+      sources: [...new Set(group.map(g => g.source))],
+    };
+  }
+  return result;
 }
 
 // ============================================
@@ -784,9 +892,111 @@ const US_ETF = {
   'AMD': [['SPY', 0.5], ['QQQ', 1.2], ['SOXX', 8.5]],
 };
 
-function getETFs(ticker, market) {
+// ETF 정보 캐시 (24시간)
+let _etfCache = null;
+function loadETFCache() {
+  if (_etfCache) return _etfCache;
+  try {
+    const saved = localStorage.getItem('stockradar_etf_cache');
+    if (saved) {
+      _etfCache = JSON.parse(saved);
+      return _etfCache;
+    }
+  } catch (e) {}
+  _etfCache = {};
+  return _etfCache;
+}
+
+function saveETFCache() {
+  if (!_etfCache) return;
+  try {
+    localStorage.setItem('stockradar_etf_cache', JSON.stringify(_etfCache));
+  } catch (e) {}
+}
+
+// 하드코딩된 ETF 정보 (네이버 실패 시 폴백)
+function getETFsFromHardcoded(ticker, market) {
   const map = market === 'kr' ? KR_ETF : US_ETF;
   return map[ticker] || [];
+}
+
+// 동기 버전 (즉시 표시용 - 캐시 또는 하드코딩)
+function getETFs(ticker, market) {
+  const cache = loadETFCache();
+  const cacheKey = `${market}_${ticker}`;
+  const cached = cache[cacheKey];
+  // 24시간 이내 캐시
+  if (cached && (Date.now() - cached.ts) < 24 * 60 * 60 * 1000 && cached.etfs?.length) {
+    return cached.etfs;
+  }
+  // 하드코딩 폴백
+  return getETFsFromHardcoded(ticker, market);
+}
+
+// 네이버 금융에서 ETF 편입 정보 가져오기 (한국 종목만)
+async function fetchETFsFromNaver(ticker, market = 'kr') {
+  if (market !== 'kr') return null;
+  const newsProxy = STATE.settings.newsProxyUrl;
+  if (!newsProxy) return null;
+
+  try {
+    // 네이버 금융 종목 페이지에서 ETF 정보 추출
+    // m.stock.naver.com 의 종목 상세 정보 API 사용
+    const url = `https://m.stock.naver.com/api/stock/${ticker}/etf`;
+    const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+    const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+
+    // 다양한 응답 형식 처리
+    let etfList = [];
+    if (Array.isArray(j)) etfList = j;
+    else if (Array.isArray(j?.etfs)) etfList = j.etfs;
+    else if (Array.isArray(j?.list)) etfList = j.list;
+    else if (Array.isArray(j?.items)) etfList = j.items;
+    else if (Array.isArray(j?.data)) etfList = j.data;
+
+    // ETF 정보 정규화
+    const result = etfList
+      .map(item => {
+        const name = item.itemName || item.name || item.etfName || item.title;
+        const ratio = parseFloat(item.weight || item.ratio || item.percentage || item.holdingRate || item.composition || 0);
+        if (!name || isNaN(ratio) || ratio <= 0) return null;
+        return [name, parseFloat(ratio.toFixed(2))];
+      })
+      .filter(x => x !== null)
+      .sort((a, b) => b[1] - a[1])  // 비중 큰 순
+      .slice(0, 15);  // 상위 15개
+
+    if (result.length > 0) {
+      // 캐시에 저장 (24시간)
+      const cache = loadETFCache();
+      cache[`${market}_${ticker}`] = { ts: Date.now(), etfs: result };
+      saveETFCache();
+      return result;
+    }
+    return null;
+  } catch (e) {
+    console.warn('Naver ETF fetch fail', ticker, e.message);
+    return null;
+  }
+}
+
+// 비동기 ETF 가져오기 + UI 업데이트 (상세 모달 열렸을 때 호출)
+async function fetchAndUpdateETFs(ticker, market) {
+  const etfs = await fetchETFsFromNaver(ticker, market);
+  if (etfs && etfs.length > 0) {
+    // 화면 업데이트
+    const container = document.getElementById('etfContainer');
+    if (container) {
+      container.innerHTML = etfs.map(([name, pct]) =>
+        `<span class="etf-chip">${escapeHtml(name)} <span class="pct">${pct}%</span></span>`
+      ).join('');
+      // 출처 표시
+      const titleEl = document.getElementById('etfSectionTitle');
+      if (titleEl) titleEl.innerHTML = `🏷️ ETF 편입 정보 <span style="font-size:9px;color:#16a34a;font-weight:600;">· 네이버 실시간</span>`;
+    }
+  }
 }
 
 function extractTickerKR(text) {
@@ -862,9 +1072,14 @@ function extractTickerUS(text, knownTicker = null) {
   return null;
 }
 
-// 종목별로 뉴스 그룹화 + 점수 합산 → TOP N
+// 종목별로 뉴스 그룹화 + 점수 합산 + 신선도 추적 → TOP N
 function aggregateByStock(items, market) {
   const stocks = {};
+  const now = new Date().toISOString();
+
+  // 유사 뉴스 그룹화 미리 계산 (전체 items 대상)
+  const newsGroups = groupSimilarNews(items);
+
   for (const item of items) {
     const lang = market === 'kr' ? 'ko' : 'en';
     const text = `${item.title} ${item.summary || ''}`;
@@ -890,18 +1105,45 @@ function aggregateByStock(items, market) {
 
     for (const info of infos) {
       if (!info || !info.ticker) continue;
+
+      // 신선도 추적: fingerprint 등록 + 첫 발견 시간 가져옴
+      const fpData = registerFingerprint(info.ticker, matched, now);
+      const freshness = calcFreshness(fpData.firstSeen, now);
+
+      // 유사 뉴스 그룹의 첫 보도 시간 (있으면 사용)
+      const norm = normalizeTitle(item.title);
+      const groupInfo = newsGroups[norm];
+      const trueFirstReport = groupInfo ? groupInfo.firstReportedAt : item.publishedAt;
+
       const key = info.ticker;
       if (!stocks[key]) {
         stocks[key] = {
           ticker: key, name: info.name, market,
           totalScore: 0, items: [], maxImpact: 0, latestDate: null,
+          firstSeen: fpData.firstSeen,
+          fingerprintCount: fpData.count,
+          freshness: freshness,
+          stalePenalty: 0,
         };
       }
-      // 같은 뉴스가 같은 종목에 중복 추가되지 않도록
+
+      // 같은 뉴스 중복 방지
       if (!stocks[key].items.find(it => it.link === item.link)) {
-        stocks[key].items.push({ ...item, score, matched });
-        stocks[key].totalScore += Math.max(0, score - 5);
-        stocks[key].maxImpact = Math.max(stocks[key].maxImpact, score);
+        const enrichedItem = {
+          ...item, score, matched,
+          firstReportedAt: trueFirstReport,
+          firstSource: groupInfo?.firstSource || item.source,
+          duplicateCount: groupInfo?.count || 1,
+          duplicateSources: groupInfo?.sources || [item.source],
+        };
+        stocks[key].items.push(enrichedItem);
+
+        // 신선도 감점 적용한 점수
+        const adjustedScore = Math.max(1, score - freshness.penalty);
+        stocks[key].totalScore += Math.max(0, adjustedScore - 5);
+        stocks[key].maxImpact = Math.max(stocks[key].maxImpact, adjustedScore);
+        stocks[key].stalePenalty = Math.max(stocks[key].stalePenalty, freshness.penalty);
+
         if (!stocks[key].latestDate || item.publishedAt > stocks[key].latestDate) {
           stocks[key].latestDate = item.publishedAt;
         }
@@ -962,13 +1204,22 @@ async function analyzeNow() {
       totalScore: s.totalScore, maxImpact: s.maxImpact,
       itemCount: s.items.length,
       latestDate: s.latestDate,
+      firstSeen: s.firstSeen,
+      freshness: s.freshness,
+      fingerprintCount: s.fingerprintCount,
+      stalePenalty: s.stalePenalty,
       topNews: s.items.slice(0, 3).map(it => ({
         title: it.title, link: it.link, source: it.source,
         score: it.score, matched: it.matched,
         publishedAt: it.publishedAt,
+        firstReportedAt: it.firstReportedAt,
+        firstSource: it.firstSource,
+        duplicateCount: it.duplicateCount,
+        duplicateSources: it.duplicateSources,
       })),
       analyzedAt: new Date().toISOString(),
     }));
+    cleanupFingerprints();  // 오래된 fingerprint 정리
     saveState();
 
     // 화면 그리기
@@ -1032,6 +1283,34 @@ function renderStockCard(stock, rank, isTop) {
   const matched = topNews?.matched?.slice(0, 3).join(', ') || '키워드 매칭 없음';
   const tracked = STATE.tracking.find(t => t.ticker === stock.ticker && t.market === stock.market);
 
+  // 신선도 정보 (현 시점 기준 재계산)
+  const freshness = stock.firstSeen ? calcFreshness(stock.firstSeen) : null;
+  let freshnessBadge = '';
+  if (freshness) {
+    const colorMap = {
+      new: 'background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;',
+      fresh: 'background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;',
+      recent: 'background:#fef3c7;color:#92400e;border:1px solid #fde68a;',
+      old: 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;',
+      stale: 'background:#fee2e2;color:#991b1b;border:1px solid #fecaca;',
+    };
+    const style = colorMap[freshness.level] || colorMap.recent;
+    const ageStr = freshness.daysAgo === 0 ? '방금' : freshness.daysAgo + ' 전 첫 발견';
+    freshnessBadge = `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;${style}">${freshness.label} · ${ageStr}</span>`;
+  }
+
+  // 재탕 감점 표시
+  let penaltyHtml = '';
+  if (stock.stalePenalty && stock.stalePenalty > 0) {
+    penaltyHtml = `<span style="font-size:10px;color:#dc2626;font-weight:600;">⬇️ -${stock.stalePenalty}</span>`;
+  }
+
+  // 유사 뉴스 그룹 표시
+  let dupBadge = '';
+  if (topNews?.duplicateCount > 1) {
+    dupBadge = `<span style="font-size:10px;color:#6b7280;">🔄 ${topNews.duplicateCount}개 매체</span>`;
+  }
+
   let trackingHtml = '';
   if (tracked) {
     const cur = tracked.currentPrice || tracked.addedPrice;
@@ -1060,9 +1339,11 @@ function renderStockCard(stock, rank, isTop) {
             <span>${flag}</span>
             <span class="dot">·</span>
             <span class="impact-badge ${impactClass(stock.maxImpact)}">${impactEmoji(stock.maxImpact)} ${stock.maxImpact}/10</span>
+            ${penaltyHtml ? `<span class="dot">·</span>${penaltyHtml}` : ''}
             <span class="dot">·</span>
             <span>뉴스 ${stock.itemCount}건</span>
           </div>
+          ${freshnessBadge ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${freshnessBadge}${dupBadge}</div>` : ''}
         </div>
       </div>
       ${topNews ? `
@@ -1197,6 +1478,25 @@ async function openDetail(ticker, market) {
 
   const newsHtml = stock.topNews.map(n => {
     const impactCls = n.score >= 7 ? 'positive' : n.score <= 4 ? 'negative' : '';
+
+    // 최초 보도 시간 정보
+    let firstReportHtml = '';
+    if (n.firstReportedAt && n.firstReportedAt !== n.publishedAt) {
+      const firstDate = new Date(n.firstReportedAt);
+      const dateStr = firstDate.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      firstReportHtml = `<div style="font-size:10px;color:#dc2626;margin-top:4px;font-weight:600;">📅 최초 보도: ${dateStr} (${escapeHtml(n.firstSource || '?')})</div>`;
+    } else if (n.publishedAt) {
+      const pubDate = new Date(n.publishedAt);
+      const dateStr = pubDate.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      firstReportHtml = `<div style="font-size:10px;color:#6b7280;margin-top:4px;">📅 ${dateStr}</div>`;
+    }
+
+    // 유사 뉴스 정보
+    let dupHtml = '';
+    if (n.duplicateCount > 1) {
+      dupHtml = `<div style="font-size:10px;color:#92400e;margin-top:2px;">🔄 ${n.duplicateCount}개 매체에서 보도 (${escapeHtml((n.duplicateSources || []).slice(0, 3).join(', '))}${n.duplicateSources?.length > 3 ? ' 외' : ''})</div>`;
+    }
+
     return `
       <div class="news-item ${impactCls}">
         <div class="news-title">${escapeHtml(n.title)}</div>
@@ -1206,6 +1506,8 @@ async function openDetail(ticker, market) {
           <span>·</span>
           <span>${timeAgo(n.publishedAt)}</span>
         </div>
+        ${firstReportHtml}
+        ${dupHtml}
         ${n.matched && n.matched.length ? `<div style="font-size:10px;color:#6b7280;margin-top:6px;">🏷️ ${escapeHtml(n.matched.join(', '))}</div>` : ''}
         ${n.link ? `<a href="${n.link}" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;font-size:10px;color:#2563eb;">원문 보기 →</a>` : ''}
       </div>
@@ -1214,7 +1516,7 @@ async function openDetail(ticker, market) {
 
   const etfHtml = etfs.length
     ? etfs.map(([name, pct]) => `<span class="etf-chip">${escapeHtml(name)} <span class="pct">${pct}%</span></span>`).join('')
-    : '<div style="color:#94a3b8;font-size:12px;">ETF 편입 정보 없음</div>';
+    : '<div style="color:#94a3b8;font-size:12px;">로딩중... 또는 ETF 편입 정보 없음</div>';
 
   // AI 분석 (Gemini가 켜져있으면)
   let aiAnalysisHtml = '';
@@ -1243,6 +1545,36 @@ async function openDetail(ticker, market) {
     }, 100);
   }
 
+  // 신선도 종합 정보 카드
+  let freshnessHtml = '';
+  if (stock.firstSeen) {
+    const fresh = calcFreshness(stock.firstSeen);
+    const firstDate = new Date(stock.firstSeen);
+    const dateStr = firstDate.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const colorMap = {
+      new: { bg: '#fef2f2', text: '#b91c1c', label: '✨ NEW' },
+      fresh: { bg: '#f0fdf4', text: '#166534', label: '🆕 신선한 정보' },
+      recent: { bg: '#fef3c7', text: '#92400e', label: '🔄 최근 정보' },
+      old: { bg: '#f1f5f9', text: '#64748b', label: '⏰ 식상한 정보' },
+      stale: { bg: '#fee2e2', text: '#991b1b', label: '🗄️ 오래된 정보' },
+    };
+    const c = colorMap[fresh.level] || colorMap.recent;
+    freshnessHtml = `
+      <div class="detail-section">
+        <div class="detail-section-title">🕐 신선도</div>
+        <div style="background:${c.bg};border-radius:10px;padding:12px;border:1px solid ${c.text}33;">
+          <div style="font-size:14px;font-weight:700;color:${c.text};margin-bottom:6px;">${c.label}</div>
+          <div style="font-size:12px;color:${c.text};line-height:1.6;">
+            📅 처음 발견: <strong>${dateStr}</strong><br>
+            ⏱️ 시간 경과: <strong>${fresh.daysAgo === 0 ? '방금' : fresh.daysAgo + ' 전'}</strong><br>
+            🔢 같은 키워드 본 횟수: <strong>${stock.fingerprintCount || 1}회</strong>
+            ${stock.stalePenalty > 0 ? `<br>⬇️ <strong style="color:#dc2626;">재탕 감점: -${stock.stalePenalty}점</strong> (임팩트 점수에서 차감)` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   // 추천 사유 (키워드 기반)
   const allMatched = new Set();
   stock.topNews.forEach(n => (n.matched || []).forEach(m => allMatched.add(m)));
@@ -1266,6 +1598,8 @@ async function openDetail(ticker, market) {
       ${priceHtml}
     </div>
 
+    ${freshnessHtml}
+
     ${chartHtml}
 
     ${finHtml}
@@ -1278,8 +1612,8 @@ async function openDetail(ticker, market) {
     ${aiAnalysisHtml}
 
     <div class="detail-section">
-      <div class="detail-section-title">🏷️ ETF 편입 정보</div>
-      <div>${etfHtml}</div>
+      <div class="detail-section-title" id="etfSectionTitle">🏷️ ETF 편입 정보</div>
+      <div id="etfContainer">${etfHtml}</div>
     </div>
 
     <div class="detail-section">
@@ -1294,6 +1628,17 @@ async function openDetail(ticker, market) {
       <button class="action-btn secondary" onclick="closeModal('detailModal')">닫기</button>
     </div>
   `;
+
+  // 한국 종목이면 네이버 ETF 정보 비동기로 가져오기 (캐시 없을 때만)
+  if (market === 'kr') {
+    const cache = loadETFCache();
+    const cacheKey = `${market}_${ticker}`;
+    const cached = cache[cacheKey];
+    if (!cached || (Date.now() - cached.ts) > 24 * 60 * 60 * 1000) {
+      // 캐시 없거나 24시간 지남 → 백그라운드 갱신
+      setTimeout(() => fetchAndUpdateETFs(ticker, market), 200);
+    }
+  }
 }
 
 // 헬퍼 함수
