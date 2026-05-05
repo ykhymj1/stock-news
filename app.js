@@ -660,7 +660,7 @@ async function analyzeWithGemini(text, lang = 'ko') {
     const prompt = lang === 'ko'
       ? `다음 한국 주식 관련 뉴스/공시를 분석하세요. JSON 형식으로 응답:\n{"impact":1-10 점수,"reason":"한 문장 핵심 분석","positives":["긍정 요인"],"negatives":["부정 요인"]}\n\n뉴스: ${text}`
       : `Analyze this US stock news/filing. Respond in JSON:\n{"impact":1-10 score,"reason":"one sentence analysis (in Korean)","positives":["positives"],"negatives":["negatives"]}\n\nNews: ${text}`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
