@@ -507,6 +507,13 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 
     <div class="section-title">📊 데이터</div>
     <div class="settings-card">
+      <div class="settings-row" onclick="backupApiKeys()" style="cursor:pointer;">
+        <div>
+          <div class="settings-label">🔐 API 키만 백업</div>
+          <div class="settings-desc">텍스트 파일로 따로 보관 (캐시 삭제 시 복구용)</div>
+        </div>
+        <span style="font-size:18px;">🔑</span>
+      </div>
       <div class="settings-row" onclick="exportData()" style="cursor:pointer;">
         <div>
           <div class="settings-label">데이터 내보내기</div>

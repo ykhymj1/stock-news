@@ -33,22 +33,64 @@ const DEFAULTS = {
 let STATE = loadState();
 
 // ============================================
-// API 키 영구 저장 (버전 업그레이드해도 유지)
+// API 키 영구 저장 (다중 백업)
+// localStorage + sessionStorage + 쿠키 (어떤 캐시 삭제에도 1개는 남도록)
 // ============================================
 function loadPersistentApiKeys() {
+  // 1) localStorage 시도
   try {
     const saved = localStorage.getItem(API_KEYS_STORE);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && (parsed.dartKey || parsed.geminiKey || parsed.workerUrl)) {
+        return parsed;
+      }
+    }
   } catch (e) {}
+
+  // 2) 쿠키에서 백업 복원 시도 (1년 보존)
+  try {
+    const cookieMatch = document.cookie.match(/stockradar_keys=([^;]+)/);
+    if (cookieMatch) {
+      const decoded = decodeURIComponent(cookieMatch[1]);
+      const parsed = JSON.parse(decoded);
+      if (parsed && (parsed.dartKey || parsed.geminiKey)) {
+        // 쿠키에서 복원 → localStorage에도 다시 저장
+        try { localStorage.setItem(API_KEYS_STORE, decoded); } catch (e) {}
+        console.log('🔐 쿠키 백업에서 API 키 복원됨');
+        return parsed;
+      }
+    }
+  } catch (e) {}
+
   return {};
 }
 
 function savePersistentApiKeys(keys) {
+  const json = JSON.stringify(keys);
+
+  // 1) localStorage
   try {
-    localStorage.setItem(API_KEYS_STORE, JSON.stringify(keys));
+    localStorage.setItem(API_KEYS_STORE, json);
   } catch (e) {
-    console.error('API 키 저장 실패:', e);
+    console.error('localStorage 저장 실패:', e);
   }
+
+  // 2) 쿠키 백업 (1년, HttpOnly 아니므로 자바스크립트로 읽기 가능)
+  try {
+    const oneYear = new Date();
+    oneYear.setFullYear(oneYear.getFullYear() + 1);
+    const cookieValue = encodeURIComponent(json);
+    // 4KB 제한 안에 들어가므로 안전
+    if (cookieValue.length < 4000) {
+      document.cookie = `stockradar_keys=${cookieValue}; expires=${oneYear.toUTCString()}; path=/; SameSite=Lax`;
+    }
+  } catch (e) {}
+
+  // 3) sessionStorage (탭 닫으면 삭제되지만 새로고침에는 강함)
+  try {
+    sessionStorage.setItem(API_KEYS_STORE, json);
+  } catch (e) {}
 }
 
 function loadState() {
@@ -1610,6 +1652,44 @@ function exportData() {
   a.click();
   URL.revokeObjectURL(url);
   showToast('📥 백업 파일 다운로드');
+}
+
+// API 키만 따로 백업 (텍스트로)
+function backupApiKeys() {
+  const keys = {
+    dartKey: STATE.settings.dartKey,
+    geminiKey: STATE.settings.geminiKey,
+    workerUrl: STATE.settings.workerUrl,
+    newsProxyUrl: STATE.settings.newsProxyUrl,
+    backupDate: new Date().toISOString(),
+  };
+  const text = `# StockRadar API 키 백업
+# 백업일: ${new Date().toLocaleString('ko-KR')}
+# 이 파일을 안전한 곳에 보관하세요
+
+DART API 키:
+${keys.dartKey || '(없음)'}
+
+Gemini API 키:
+${keys.geminiKey || '(없음)'}
+
+Cloudflare Worker URL (시세):
+${keys.workerUrl || '(없음)'}
+
+News Proxy URL:
+${keys.newsProxyUrl || '(없음)'}
+
+# JSON 형식 (앱에서 가져오기 용):
+${JSON.stringify(keys, null, 2)}
+`;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `stockradar_API키백업_${todayStr()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('🔐 API 키 백업 다운로드');
 }
 
 function importData() {
