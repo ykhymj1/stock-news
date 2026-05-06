@@ -601,34 +601,60 @@ async function fetchFinancials(ticker, market = 'kr') {
   if (!newsProxy) return null;
 
   if (market === 'kr') {
-    // Naver Finance API로 한국 종목 재무 정보
+    // Naver Finance API (api.stock.naver.com) - 검증된 엔드포인트
     try {
-      const url = `https://m.stock.naver.com/api/stock/${ticker}/integration`;
+      const url = `https://api.stock.naver.com/stock/${ticker}/basic`;
       const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
       const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
-      // 응답에서 필요한 필드 추출
-      const stockEnd = j.stockEndType || 'KOSPI';
-      const total = j.totalInfos || [];
-      const findVal = (key) => {
-        const item = total.find(it => it.key === key || it.code === key);
-        return item ? item.value : null;
+
+      // stockItemTotalInfos 배열에서 키워드별 값 찾기
+      const infos = j.stockItemTotalInfos || [];
+      const findInfo = (codes) => {
+        for (const code of codes) {
+          const item = infos.find(it => it.code === code || it.key === code);
+          if (item && item.value) {
+            // "1,234,567" → 1234567 변환
+            const numVal = parseFloat(item.value.toString().replace(/[,%원]/g, ''));
+            return isNaN(numVal) ? item.value : numVal;
+          }
+        }
+        return null;
       };
+
+      // 시가총액 처리 (네이버는 보통 백만원 단위로 응답)
+      const marketCapStr = j.marketValue || findInfo(['marketValue', 'MARKET_VALUE']);
+      let marketCap = null;
+      if (marketCapStr) {
+        // "5,432,109" 같은 백만원 단위 문자열 → 원 단위 숫자
+        const num = parseFloat(marketCapStr.toString().replace(/[,원]/g, ''));
+        if (!isNaN(num) && num > 0) {
+          // 네이버는 시가총액을 "백만원" 단위로 줌. 1조 이상 되도록 처리
+          // 보통 5,432,109 (5.4조원) 형태
+          marketCap = num * 1000000; // 백만원 → 원
+        }
+      }
+
+      const closePrice = parseFloat((j.closePrice || '').toString().replace(/,/g, ''));
+
       return {
-        marketCap: findVal('marketValue'),  // 시가총액
-        per: findVal('per') || findVal('PER'),
-        pbr: findVal('pbr') || findVal('PBR'),
-        eps: findVal('eps') || findVal('EPS'),
-        bps: findVal('bps') || findVal('BPS'),
-        dividendYield: findVal('dividendRatio') || findVal('dividend'),
-        high52w: findVal('high52'),
-        low52w: findVal('low52'),
-        volume: findVal('volume'),
-        market: stockEnd,
+        marketCap: marketCap,
+        per: findInfo(['per', 'PER']),
+        pbr: findInfo(['pbr', 'PBR']),
+        eps: findInfo(['eps', 'EPS']),
+        bps: findInfo(['bps', 'BPS']),
+        dividendYield: findInfo(['dividendRatio', 'DIV', 'divYield']),
+        high52w: findInfo(['high52wPrice', 'HIGH_52W', 'fiftyTwoWeekHigh']),
+        low52w: findInfo(['low52wPrice', 'LOW_52W', 'fiftyTwoWeekLow']),
+        volume: findInfo(['accumulatedTradingVolume', 'TRADE_VOLUME', 'volume']),
+        currentPrice: closePrice || null,
+        currency: 'KRW',
+        market: j.stockEndType || 'KOSPI',
+        stockName: j.stockName,
       };
     } catch (e) {
-      console.warn('KR financials fail', ticker, e.message);
+      console.warn('[KR Financials]', ticker, e.message);
       return null;
     }
   } else {
@@ -665,6 +691,58 @@ async function fetchChartData(ticker, market = 'kr', range = '3mo') {
   const newsProxy = STATE.settings.newsProxyUrl;
   if (!newsProxy) return null;
 
+  // 한국 종목 → 네이버 차트 API 사용 (검증된 엔드포인트)
+  if (market === 'kr') {
+    try {
+      // 3개월 전 ~ 오늘 날짜 계산
+      const today = new Date();
+      const threeMoAgo = new Date();
+      threeMoAgo.setMonth(today.getMonth() - 3);
+      const fmtDate = (d) => d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+      const startTime = fmtDate(threeMoAgo);
+      const endTime = fmtDate(today);
+
+      const url = `https://api.finance.naver.com/siseJson.naver?symbol=${ticker}&requestType=1&startTime=${startTime}&endTime=${endTime}&timeframe=day`;
+      const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      let txt = await r.text();
+      // 응답이 [\n\t['날짜',...] 형식 - 줄바꿈/탭 제거하고 작은따옴표 → 큰따옴표
+      txt = txt.replace(/[\n\t]/g, '').replace(/'/g, '"').trim();
+      // 마지막에 콤마+닫는 괄호 등 정리
+      txt = txt.replace(/,\s*\]/g, ']');
+      const arr = JSON.parse(txt);
+      if (!Array.isArray(arr) || arr.length < 2) return null;
+
+      const data = [];
+      // 첫 번째는 헤더 ['날짜','시가','고가','저가','종가','거래량','외국인소진율']
+      for (let i = 1; i < arr.length; i++) {
+        const row = arr[i];
+        if (!row || row.length < 5) continue;
+        const dateStr = String(row[0]); // "20260214"
+        if (dateStr.length !== 8) continue;
+        const isoDate = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+        const ts = new Date(isoDate).getTime();
+        const close = parseFloat(row[4]);
+        if (isNaN(close)) continue;
+        data.push({
+          ts: ts,
+          date: isoDate,
+          o: parseFloat(row[1]) || close,
+          h: parseFloat(row[2]) || close,
+          l: parseFloat(row[3]) || close,
+          c: close,
+          v: parseFloat(row[5]) || 0,
+        });
+      }
+      return data.length > 0 ? data : null;
+    } catch (e) {
+      console.warn('[KR Chart]', ticker, e.message);
+      return null;
+    }
+  }
+
+  // 미국 종목 → Yahoo Finance
   const symbol = market === 'kr' ? ticker + '.KS' : ticker;
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}`;
@@ -869,6 +947,7 @@ News: ${text}`;
 // ============================================
 async function fetchPrice(ticker, market = 'kr') {
   const worker = STATE.settings.workerUrl;
+  const newsProxy = STATE.settings.newsProxyUrl;
   const isKR = market === 'kr';
   const tk = isKR ? `${ticker}.KS` : ticker;
 
@@ -923,6 +1002,26 @@ async function fetchPrice(ticker, market = 'kr') {
       };
     }
   } catch (e) {}
+
+  // 3) KR 추가 폴백: Naver basic API 활용
+  if (isKR && newsProxy) {
+    try {
+      const url = `https://api.stock.naver.com/stock/${ticker}/basic`;
+      const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+      if (r.ok) {
+        const j = await r.json();
+        const cur = parseFloat((j.closePrice || '').toString().replace(/,/g, ''));
+        if (cur > 0) {
+          const diff = parseFloat((j.compareToPreviousClosePrice || '0').toString().replace(/,/g, ''));
+          const code = j.compareToPreviousPrice?.code;
+          const sign = code === '2' ? 1 : (code === '5' ? -1 : 0);
+          const prev = cur - (sign * diff) || cur;
+          return { price: cur, prev: prev, currency: 'KRW' };
+        }
+      }
+    } catch (e) {}
+  }
 
   return null;
 }
@@ -2264,5 +2363,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // PWA Service Worker 등록
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  // 텔레그램 알림에서 들어온 경우 해당 종목 자동 열기
+  // URL: /?t=006360&m=kr
+  const urlParams = new URLSearchParams(window.location.search);
+  const ticker = urlParams.get('t');
+  const market = urlParams.get('m');
+  if (ticker && market) {
+    // 시장 탭 변경
+    if (STATE.market !== market) {
+      STATE.market = market;
+      document.querySelectorAll('.mkt-tab').forEach(t => t.classList.toggle('active', t.dataset.market === market));
+    }
+    // 1초 후 종목 모달 열기 (앱 초기화 후)
+    setTimeout(() => {
+      openDetail(ticker, market);
+    }, 1000);
   }
 });
