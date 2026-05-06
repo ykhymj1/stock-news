@@ -1,7 +1,7 @@
-// StockRadar Service Worker v4
-const CACHE = 'stockradar-v4';
+// StockRadar Service Worker v5
+const CACHE = 'stockradar-v5';
 const FILES = [
-  './index.html', './app.js', './kr_stocks.js', './us_stocks.js', './manifest.json',
+  './index.html', './app.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
   './icon-192.png', './icon-512.png', './icon-180.png',
   './icon-32.png', './icon-16.png',
