@@ -1585,13 +1585,25 @@ async function openDetail(ticker, market) {
   document.getElementById('detailModal').classList.add('active');
 
   // 병렬로 모든 데이터 가져오기 (DART는 한국 종목만)
-  const [priceData, financials, chartData, dartData] = await Promise.all([
+  let [priceData, financials, chartData, dartData] = await Promise.all([
     fetchPrice(ticker, market),
     fetchFinancials(ticker, market),
     fetchChartData(ticker, market, '3mo'),
     market === 'kr' ? fetchDartFinance(ticker) : Promise.resolve(null),
   ]);
   const etfs = getETFs(ticker, market);
+
+  // financials가 null이고 DART 데이터가 있으면 빈 객체로 초기화
+  // (네이버 API 실패해도 DART 데이터는 표시)
+  if (!financials && dartData && (dartData.financials || dartData.company)) {
+    financials = {
+      marketCap: null,
+      per: null,
+      pbr: null,
+      currency: 'KRW',
+      market: 'KOSPI',
+    };
+  }
 
   // DART 데이터를 financials에 병합 (DART가 더 정확하므로 우선)
   if (dartData && dartData.financials && financials) {
@@ -1622,6 +1634,15 @@ async function openDetail(ticker, market) {
     financials.companyInfo.address = dartData.company.address;
     financials.companyInfo.homepage = dartData.company.homepage;
     financials.companyInfo.corp_name_eng = dartData.company.corp_name_eng;
+
+    // 정적 데이터(stock_info.js)에서 industry/sector 보강
+    const staticInfo = (window.KR_STOCK_INFO && window.KR_STOCK_INFO[ticker]) || null;
+    if (staticInfo) {
+      financials.companyInfo.industry = financials.companyInfo.industry || staticInfo.industry;
+      financials.companyInfo.sector = financials.companyInfo.sector || staticInfo.sector;
+      financials.companyInfo.theme = financials.companyInfo.theme || staticInfo.theme;
+      financials.companyInfo.description = financials.companyInfo.description || staticInfo.description;
+    }
   }
 
 
