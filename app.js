@@ -609,26 +609,13 @@ async function fetchFinancials(ticker, market = 'kr') {
   };
 
   if (market === 'kr') {
-    // 한국 종목: 네이버 basic + integration 동시 호출
+    // 한국 종목: 네이버 basic API (검증된 안정적 엔드포인트)
     try {
-      const basicUrl = `https://api.stock.naver.com/stock/${ticker}/basic`;
-      const integrationUrl = `https://m.stock.naver.com/api/stock/${ticker}/integration`;
-
-      const [basicRes, integrationRes] = await Promise.allSettled([
-        fetch(newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(basicUrl), { signal: AbortSignal.timeout(8000) }),
-        fetch(newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(integrationUrl), { signal: AbortSignal.timeout(8000) }),
-      ]);
-
-      let basic = null, integration = null;
-      if (basicRes.status === 'fulfilled' && basicRes.value.ok) {
-        basic = await basicRes.value.json();
-      }
-      if (integrationRes.status === 'fulfilled' && integrationRes.value.ok) {
-        integration = await integrationRes.value.json();
-      }
-
-      if (!basic && !integration) return null;
-      const j = basic || {};
+      const url = `https://api.stock.naver.com/stock/${ticker}/basic`;
+      const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
 
       // stockItemTotalInfos 배열에서 키워드별 값 찾기
       const infos = j.stockItemTotalInfos || [];
@@ -655,73 +642,27 @@ async function fetchFinancials(ticker, market = 'kr') {
 
       const closePrice = parseFloat((j.closePrice || '').toString().replace(/,/g, ''));
 
-      // 회사 정보 추출 (basic + integration API에서)
+      // basic 응답에서 추출 가능한 회사 정보
       let companyInfo = null;
-      let financialStatements = null;
-
-      // basic API에 있는 정보 (j는 basic 응답)
-      const basicIndustry = j.industry || j.industryName || j.wicsName || null;
-      const basicSector = j.wicsSectorName || j.sectorName || null;
-
-      if (integration || basicIndustry || basicSector) {
-        // 회사 기본 정보 (integration > basic 우선순위)
-        const intg = integration || {};
+      const industry = j.industry || j.industryName || j.wicsName || null;
+      const sector = j.wicsSectorName || j.sectorName || null;
+      if (industry || sector) {
         companyInfo = {
-          industry: intg.industryGroupKor || intg.industryGroup || intg.industry || intg.industryName || basicIndustry,
-          sector: intg.wicsSectorName || intg.sectorName || intg.sector || basicSector,
-          theme: Array.isArray(intg.themes) ? intg.themes.slice(0, 3).map(t => t.themeName || t).filter(Boolean).join(', ') : null,
-          description: intg.companySummary || intg.summary || intg.description || null,
-          ceoName: intg.ceoName || intg.representativeName || null,
-          establishedDate: intg.establishedDate || intg.foundedDate || null,
-          listingDate: intg.listingDate || intg.listedDate || null,
-          foreignRatio: intg.foreignRatio || intg.foreignOwnershipRatio || null,
-          employeeCount: intg.employeeCount || intg.employees || null,
-          homepage: intg.homepage || intg.companyHomepage || null,
+          industry: industry,
+          sector: sector,
+          theme: null,
+          description: null,
         };
-
-        // null/빈 값 제거 - 모두 null이면 companyInfo도 null
-        const hasInfo = Object.values(companyInfo).some(v => v != null && v !== '');
-        if (!hasInfo) companyInfo = null;
       }
 
-      // 재무 정보 (분기/연간 실적)
-      if (integration) {
-        if (integration.financeSummary) {
-          const fs = integration.financeSummary;
-          financialStatements = {
-            revenue: parseFinanceValue(fs.salesAmount || fs.revenue),
-            operatingProfit: parseFinanceValue(fs.operatingProfit),
-            netProfit: parseFinanceValue(fs.netProfit || fs.netIncome),
-            roe: parseFinanceValue(fs.roe),
-            roa: parseFinanceValue(fs.roa),
-            debtRatio: parseFinanceValue(fs.debtRatio || fs.totalDebtRatio),
-            currentRatio: parseFinanceValue(fs.currentRatio),
-            reserveRatio: parseFinanceValue(fs.reserveRatio),
-            revenueGrowth: parseFinanceValue(fs.salesGrowthRate),
-            profitGrowth: parseFinanceValue(fs.operatingProfitGrowthRate),
-          };
-        }
-
-        // 다른 형태로 있는 경우
-        if ((integration.summaryFinancials || integration.financials) && !financialStatements) {
-          const f = integration.summaryFinancials || integration.financials;
-          if (Array.isArray(f) && f.length > 0) {
-            const latest = f[f.length - 1];
-            financialStatements = {
-              revenue: parseFinanceValue(latest.salesAmount || latest.revenue),
-              operatingProfit: parseFinanceValue(latest.operatingProfit),
-              netProfit: parseFinanceValue(latest.netProfit || latest.netIncome),
-              debtRatio: parseFinanceValue(latest.debtRatio),
-              roe: parseFinanceValue(latest.roe),
-            };
-          }
-        }
-
-        // 모든 값이 null이면 financialStatements도 null
-        if (financialStatements) {
-          const hasFs = Object.values(financialStatements).some(v => v != null);
-          if (!hasFs) financialStatements = null;
-        }
+      // 정적 정보가 kr_stocks.js / us_stocks.js 에 있으면 보강
+      const staticInfo = (window.KR_STOCK_INFO && window.KR_STOCK_INFO[ticker]) || null;
+      if (staticInfo) {
+        companyInfo = companyInfo || {};
+        companyInfo.industry = companyInfo.industry || staticInfo.industry;
+        companyInfo.sector = companyInfo.sector || staticInfo.sector;
+        companyInfo.theme = staticInfo.theme;
+        companyInfo.description = staticInfo.description;
       }
 
       return {
@@ -737,93 +678,47 @@ async function fetchFinancials(ticker, market = 'kr') {
         currentPrice: closePrice || null,
         currency: 'KRW',
         market: j.stockEndType || 'KOSPI',
-        stockName: j.stockName || (integration && integration.stockName),
-        // 새로 추가된 정보
+        stockName: j.stockName,
         companyInfo,
-        financialStatements,
+        financialStatements: null, // basic API는 재무제표 미제공
       };
     } catch (e) {
       console.warn('[KR Financials]', ticker, e.message);
       return null;
     }
   } else {
-    // 미국 종목: Yahoo Finance v8 chart + quoteSummary
+    // 미국 종목: Yahoo Finance v8 chart API (인증 불필요)
     try {
-      const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
-      const summaryUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=summaryProfile,financialData,defaultKeyStatistics,price`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
+      const proxy = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      const meta = j?.chart?.result?.[0]?.meta;
+      if (!meta) return null;
 
-      const [chartRes, summaryRes] = await Promise.allSettled([
-        fetch(newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(chartUrl), { signal: AbortSignal.timeout(8000) }),
-        fetch(newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(summaryUrl), { signal: AbortSignal.timeout(8000) }),
-      ]);
-
-      let meta = null, summary = null;
-      if (chartRes.status === 'fulfilled' && chartRes.value.ok) {
-        const j = await chartRes.value.json();
-        meta = j?.chart?.result?.[0]?.meta;
-      }
-      if (summaryRes.status === 'fulfilled' && summaryRes.value.ok) {
-        const j = await summaryRes.value.json();
-        summary = j?.quoteSummary?.result?.[0];
-      }
-
-      if (!meta && !summary) return null;
-
-      // 회사 정보 (summaryProfile)
-      const profile = summary?.summaryProfile;
-      const companyInfo = profile ? {
-        industry: profile.industry || null,
-        sector: profile.sector || null,
-        description: profile.longBusinessSummary || null,
-        country: profile.country || null,
-        city: profile.city || null,
-        state: profile.state || null,
-        employeeCount: profile.fullTimeEmployees || null,
-        website: profile.website || null,
-      } : null;
-
-      // 재무 정보 (financialData)
-      const fd = summary?.financialData;
-      const ks = summary?.defaultKeyStatistics;
-      const priceModule = summary?.price;
-
-      const financialStatements = (fd || ks) ? {
-        revenue: fd?.totalRevenue?.raw || null,
-        operatingProfit: null, // Yahoo는 직접 제공 안 함
-        netProfit: ks?.netIncomeToCommon?.raw || null,
-        roe: fd?.returnOnEquity?.raw ? fd.returnOnEquity.raw * 100 : null,
-        roa: fd?.returnOnAssets?.raw ? fd.returnOnAssets.raw * 100 : null,
-        debtRatio: fd?.debtToEquity?.raw || null,
-        currentRatio: fd?.currentRatio?.raw || null,
-        // 성장률
-        revenueGrowth: fd?.revenueGrowth?.raw ? fd.revenueGrowth.raw * 100 : null,
-        profitGrowth: fd?.earningsGrowth?.raw ? fd.earningsGrowth.raw * 100 : null,
-        // 마진
-        profitMargin: fd?.profitMargins?.raw ? fd.profitMargins.raw * 100 : null,
-        operatingMargin: fd?.operatingMargins?.raw ? fd.operatingMargins.raw * 100 : null,
-        // 현금
-        totalCash: fd?.totalCash?.raw || null,
-        totalDebt: fd?.totalDebt?.raw || null,
+      // 정적 정보가 us_stocks.js 에 있으면 사용
+      const staticInfo = (window.US_STOCK_INFO && window.US_STOCK_INFO[ticker]) || null;
+      const companyInfo = staticInfo ? {
+        industry: staticInfo.industry,
+        sector: staticInfo.sector,
+        description: staticInfo.description,
+        country: staticInfo.country || 'USA',
       } : null;
 
       return {
-        marketCap: priceModule?.marketCap?.raw || ks?.enterpriseValue?.raw || null,
-        per: ks?.trailingPE?.raw || ks?.forwardPE?.raw || null,
-        pbr: ks?.priceToBook?.raw || null,
-        eps: ks?.trailingEps?.raw || null,
-        bps: null,
-        dividendYield: priceModule?.dividendYield?.raw ? priceModule.dividendYield.raw * 100 : null,
-        currency: meta?.currency || priceModule?.currency || 'USD',
-        currentPrice: meta?.regularMarketPrice || priceModule?.regularMarketPrice?.raw || null,
-        previousClose: meta?.chartPreviousClose || null,
-        high52w: meta?.fiftyTwoWeekHigh || ks?.['52WeekHigh']?.raw || null,
-        low52w: meta?.fiftyTwoWeekLow || ks?.['52WeekLow']?.raw || null,
-        volume: meta?.regularMarketVolume || null,
-        avgVolume: meta?.averageVolume || null,
-        exchange: meta?.exchangeName || null,
-        // 새로 추가된 정보
+        marketCap: null,
+        per: null,
+        currency: meta.currency,
+        currentPrice: meta.regularMarketPrice,
+        previousClose: meta.chartPreviousClose,
+        high52w: meta.fiftyTwoWeekHigh,
+        low52w: meta.fiftyTwoWeekLow,
+        volume: meta.regularMarketVolume,
+        avgVolume: meta.averageVolume,
+        exchange: meta.exchangeName,
         companyInfo,
-        financialStatements,
+        financialStatements: null,
       };
     } catch (e) {
       console.warn('US financials fail', ticker, e.message);
@@ -832,7 +727,53 @@ async function fetchFinancials(ticker, market = 'kr') {
   }
 }
 
-// 일봉 차트 데이터 가져오기 (3개월)
+// ============================================
+// DART API 통합 (재무제표 + 회사 정보)
+// ============================================
+async function fetchDartFinance(ticker) {
+  const newsProxy = STATE.settings.newsProxyUrl;
+  const dartKey = STATE.settings.dartKey;
+  if (!newsProxy || !dartKey) return null;
+
+  // LocalStorage 캐시 확인 (24시간)
+  try {
+    const cacheKey = `dart_finance_${ticker}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.savedAt && (Date.now() - parsed.savedAt) < 24 * 60 * 60 * 1000) {
+        return parsed.data;
+      }
+    }
+  } catch (e) {}
+
+  try {
+    const url = newsProxy.replace(/\/$/, '') + '/dart-finance?ticker=' + encodeURIComponent(ticker) + '&apikey=' + encodeURIComponent(dartKey);
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) {
+      console.warn('[DART Finance] HTTP', r.status, ticker);
+      return null;
+    }
+    const data = await r.json();
+    if (!data.ok) {
+      console.warn('[DART Finance]', ticker, data.error || data.note || 'No data');
+      return null;
+    }
+
+    // 캐시 저장
+    try {
+      const cacheKey = `dart_finance_${ticker}`;
+      localStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), data }));
+    } catch (e) {}
+
+    return data;
+  } catch (e) {
+    console.warn('[DART Finance] fail', ticker, e.message);
+    return null;
+  }
+}
+
+
 async function fetchChartData(ticker, market = 'kr', range = '3mo') {
   const newsProxy = STATE.settings.newsProxyUrl;
   if (!newsProxy) return null;
@@ -1643,13 +1584,46 @@ async function openDetail(ticker, market) {
   document.getElementById('modalBody').innerHTML = `<div class="loading"><div class="spinner"></div>분석중...</div>`;
   document.getElementById('detailModal').classList.add('active');
 
-  // 병렬로 모든 데이터 가져오기
-  const [priceData, financials, chartData] = await Promise.all([
+  // 병렬로 모든 데이터 가져오기 (DART는 한국 종목만)
+  const [priceData, financials, chartData, dartData] = await Promise.all([
     fetchPrice(ticker, market),
     fetchFinancials(ticker, market),
     fetchChartData(ticker, market, '3mo'),
+    market === 'kr' ? fetchDartFinance(ticker) : Promise.resolve(null),
   ]);
   const etfs = getETFs(ticker, market);
+
+  // DART 데이터를 financials에 병합 (DART가 더 정확하므로 우선)
+  if (dartData && dartData.financials && financials) {
+    financials.financialStatements = {
+      revenue: dartData.financials.revenue,
+      operatingProfit: dartData.financials.operating_profit,
+      netProfit: dartData.financials.net_income,
+      totalAssets: dartData.financials.total_assets,
+      totalLiabilities: dartData.financials.total_liabilities,
+      totalEquity: dartData.financials.total_equity,
+      roe: dartData.financials.roe,
+      roa: dartData.financials.roa,
+      debtRatio: dartData.financials.debt_ratio,
+      operatingMargin: dartData.financials.operating_margin,
+      profitMargin: dartData.financials.profit_margin,
+      revenueGrowth: dartData.financials.revenue_growth,
+      profitGrowth: dartData.financials.profit_growth,
+      netIncomeGrowth: dartData.financials.net_income_growth,
+      reportYear: dartData.year,
+      reportType: dartData.report,
+    };
+  }
+  if (dartData && dartData.company && financials) {
+    if (!financials.companyInfo) financials.companyInfo = {};
+    financials.companyInfo.ceoName = dartData.company.ceo_nm || financials.companyInfo.ceoName;
+    financials.companyInfo.establishedDate = dartData.company.establishment_date || financials.companyInfo.establishedDate;
+    financials.companyInfo.listingDate = dartData.company.listing_date || financials.companyInfo.listingDate;
+    financials.companyInfo.address = dartData.company.address;
+    financials.companyInfo.homepage = dartData.company.homepage;
+    financials.companyInfo.corp_name_eng = dartData.company.corp_name_eng;
+  }
+
 
   // 가격 정보 카드
   let priceHtml = '<div class="empty" style="padding:14px;"><div class="desc">시세 가져오기 실패</div></div>';
@@ -1704,16 +1678,32 @@ async function openDetail(ticker, market) {
     const ci = financials.companyInfo;
     const items = [];
 
+    if (ci.corp_name_eng) items.push(`<div style="margin-bottom:8px;"><b>영문명:</b> ${escapeHtml(ci.corp_name_eng)}</div>`);
     if (ci.sector) items.push(`<div style="margin-bottom:8px;"><b>섹터:</b> ${escapeHtml(ci.sector)}</div>`);
     if (ci.industry) items.push(`<div style="margin-bottom:8px;"><b>업종:</b> ${escapeHtml(ci.industry)}</div>`);
     if (ci.theme) items.push(`<div style="margin-bottom:8px;"><b>테마:</b> ${escapeHtml(ci.theme)}</div>`);
     if (ci.ceoName) items.push(`<div style="margin-bottom:8px;"><b>대표:</b> ${escapeHtml(ci.ceoName)}</div>`);
     if (ci.employeeCount) items.push(`<div style="margin-bottom:8px;"><b>직원수:</b> ${Number(ci.employeeCount).toLocaleString()}명</div>`);
     if (ci.foreignRatio) items.push(`<div style="margin-bottom:8px;"><b>외국인 보유율:</b> ${fmtNum(ci.foreignRatio, 2)}%</div>`);
-    if (ci.listingDate) items.push(`<div style="margin-bottom:8px;"><b>상장일:</b> ${escapeHtml(ci.listingDate)}</div>`);
+
+    // DART 날짜 형식 (YYYYMMDD) 포맷
+    const fmtDartDate = (d) => {
+      if (!d) return null;
+      const s = String(d);
+      if (s.length === 8) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+      return s;
+    };
+    if (ci.establishedDate) items.push(`<div style="margin-bottom:8px;"><b>설립일:</b> ${escapeHtml(fmtDartDate(ci.establishedDate))}</div>`);
+    if (ci.listingDate) items.push(`<div style="margin-bottom:8px;"><b>상장일:</b> ${escapeHtml(fmtDartDate(ci.listingDate))}</div>`);
+
     if (ci.country || ci.city) {
       const loc = [ci.city, ci.state, ci.country].filter(Boolean).join(', ');
       items.push(`<div style="margin-bottom:8px;"><b>본사:</b> ${escapeHtml(loc)}</div>`);
+    }
+    if (ci.address) items.push(`<div style="margin-bottom:8px;"><b>본사:</b> ${escapeHtml(ci.address)}</div>`);
+    if (ci.homepage) {
+      const url = ci.homepage.startsWith('http') ? ci.homepage : 'http://' + ci.homepage;
+      items.push(`<div style="margin-bottom:8px;"><b>홈페이지:</b> <a href="${escapeHtml(url)}" target="_blank" style="color:#2563eb;">${escapeHtml(ci.homepage)}</a></div>`);
     }
     if (ci.description) {
       const desc = String(ci.description).slice(0, 250);
@@ -1734,6 +1724,7 @@ async function openDetail(ticker, market) {
 
   // 재무제표 카드 (NEW)
   let statementsHtml = '';
+
   if (financials && financials.financialStatements) {
     const fs = financials.financialStatements;
     const sym = currency === 'KRW' ? '₩' : '$';
@@ -1794,12 +1785,33 @@ async function openDetail(ticker, market) {
     const totalDebt = fmtMoney(fs.totalDebt);
     if (totalDebt) fsCells.push(`<div class="fin-cell"><div class="lbl">총부채</div><div class="val">${totalDebt}</div></div>`);
 
+    // DART 추가 정보 (한국 - 재무상태표)
+    const totalAssets = fmtMoney(fs.totalAssets);
+    if (totalAssets) fsCells.push(`<div class="fin-cell"><div class="lbl">자산총계</div><div class="val">${totalAssets}</div></div>`);
+    const totalLiab = fmtMoney(fs.totalLiabilities);
+    if (totalLiab) fsCells.push(`<div class="fin-cell"><div class="lbl">부채총계</div><div class="val">${totalLiab}</div></div>`);
+    const totalEquity = fmtMoney(fs.totalEquity);
+    if (totalEquity) fsCells.push(`<div class="fin-cell"><div class="lbl">자본총계</div><div class="val">${totalEquity}</div></div>`);
+
+    // 순이익 성장률
+    if (fs.netIncomeGrowth != null) {
+      const cls = fs.netIncomeGrowth > 0 ? 'up' : fs.netIncomeGrowth < 0 ? 'down' : 'flat';
+      fsCells.push(`<div class="fin-cell"><div class="lbl">순이익 성장률</div><div class="val ${cls}">${fmtPct(fs.netIncomeGrowth)}</div></div>`);
+    }
+
     if (fsCells.length > 0) {
+      // 보고기간 표시
+      const reportLabel = fs.reportYear ? (() => {
+        const reportTypes = { '11013': '1분기', '11012': '반기', '11014': '3분기', '11011': '사업보고서' };
+        const type = reportTypes[fs.reportType] || fs.reportType;
+        return `📄 ${fs.reportYear}년 ${type} (DART 공시 기준)`;
+      })() : '최근 분기 기준';
+
       statementsHtml = `
         <div class="detail-section">
           <div class="detail-section-title">💼 재무제표</div>
           <div class="fin-grid">${fsCells.join('')}</div>
-          <div style="margin-top:8px;font-size:11px;color:#94a3b8;text-align:right;">최근 분기 기준</div>
+          <div style="margin-top:8px;font-size:11px;color:#94a3b8;text-align:right;">${reportLabel}</div>
         </div>
       `;
     }
