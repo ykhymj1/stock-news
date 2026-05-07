@@ -262,6 +262,33 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 }
 .fin-cell .lbl{font-size:10px;color:#6b7280;font-weight:600;}
 .fin-cell .val{font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#111827;margin-top:2px;}
+.fin-cell .val.up{color:#dc2626;}
+.fin-cell .val.down{color:#2563eb;}
+.fin-cell .val.flat{color:#6b7280;}
+
+.fin-subsection{
+  margin-bottom:14px;padding:10px;background:#fafbfc;border:1px solid #f1f5f9;border-radius:12px;
+}
+.fin-subsection:last-child{margin-bottom:0;}
+.fin-subtitle{
+  font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+.fs-badge{
+  display:inline-block;font-size:9px;font-weight:600;padding:1px 6px;border-radius:6px;
+  background:#e0e7ff;color:#4338ca;letter-spacing:0.3px;
+}
+.fin-period-tag{
+  display:inline-block;font-size:9px;font-weight:600;padding:1px 6px;border-radius:6px;
+  background:#fef3c7;color:#92400e;letter-spacing:0.3px;
+}
+.fin-period{
+  margin-top:6px;font-size:10px;color:#94a3b8;text-align:right;font-family:'DM Mono',monospace;
+}
+.fin-error{
+  padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
+  color:#b91c1c;font-size:12px;font-weight:600;
+}
 
 .etf-chip{
   display:inline-flex;align-items:center;gap:5px;
@@ -589,9 +616,9 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 
 <input type="file" id="importFile" accept=".json" style="display:none;" onchange="handleImport(event)"/>
 
-<script src="kr_stocks.js?v=20260506f"></script>
-<script src="us_stocks.js?v=20260506f"></script>
-<script src="stock_info.js?v=20260506f"></script>
-<script src="app.js?v=20260506f"></script>
+<script src="kr_stocks.js?v=20260506g"></script>
+<script src="us_stocks.js?v=20260506g"></script>
+<script src="stock_info.js?v=20260506g"></script>
+<script src="app.js?v=20260506g"></script>
 </body>
 </html>

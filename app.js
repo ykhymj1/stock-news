@@ -735,9 +735,9 @@ async function fetchDartFinance(ticker) {
   const dartKey = STATE.settings.dartKey;
   if (!newsProxy || !dartKey) return null;
 
-  // LocalStorage 캐시 확인 (24시간)
+  // LocalStorage 캐시 확인 (24시간) - v2: annual+latest_quarter 구조
   try {
-    const cacheKey = `dart_finance_${ticker}`;
+    const cacheKey = `dart_finance_v2_${ticker}`;
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
       const parsed = JSON.parse(cached);
@@ -760,9 +760,9 @@ async function fetchDartFinance(ticker) {
       return null;
     }
 
-    // 캐시 저장
+    // 캐시 저장 (v2 키)
     try {
-      const cacheKey = `dart_finance_${ticker}`;
+      const cacheKey = `dart_finance_v2_${ticker}`;
       localStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), data }));
     } catch (e) {}
 
@@ -1606,24 +1606,13 @@ async function openDetail(ticker, market) {
   }
 
   // DART 데이터를 financials에 병합 (DART가 더 정확하므로 우선)
+  // 새 구조 (Worker v4.0+): financials = { annual, latest_quarter, errors, attempts }
   if (dartData && dartData.financials && financials) {
+    const df = dartData.financials;
     financials.financialStatements = {
-      revenue: dartData.financials.revenue,
-      operatingProfit: dartData.financials.operating_profit,
-      netProfit: dartData.financials.net_income,
-      totalAssets: dartData.financials.total_assets,
-      totalLiabilities: dartData.financials.total_liabilities,
-      totalEquity: dartData.financials.total_equity,
-      roe: dartData.financials.roe,
-      roa: dartData.financials.roa,
-      debtRatio: dartData.financials.debt_ratio,
-      operatingMargin: dartData.financials.operating_margin,
-      profitMargin: dartData.financials.profit_margin,
-      revenueGrowth: dartData.financials.revenue_growth,
-      profitGrowth: dartData.financials.profit_growth,
-      netIncomeGrowth: dartData.financials.net_income_growth,
-      reportYear: dartData.year,
-      reportType: dartData.report,
+      annual: df.annual || null,
+      latestQuarter: df.latest_quarter || null,
+      errors: df.errors || null,
     };
   }
   if (dartData && dartData.company && financials) {
@@ -1743,12 +1732,12 @@ async function openDetail(ticker, market) {
     }
   }
 
-  // 재무제표 카드 (NEW)
+  // 재무제표 카드 (v2: 연간 + 최신 분기 분리 표시)
   let statementsHtml = '';
 
-  if (financials && financials.financialStatements) {
+  // 한국 (DART) 새 구조: { annual, latestQuarter, errors }
+  if (financials && financials.financialStatements && (financials.financialStatements.annual || financials.financialStatements.latestQuarter || financials.financialStatements.errors)) {
     const fs = financials.financialStatements;
-    const sym = currency === 'KRW' ? '₩' : '$';
     const isKR = currency === 'KRW';
 
     const fmtMoney = (v) => {
@@ -1756,7 +1745,7 @@ async function openDetail(ticker, market) {
       const n = Number(v);
       if (isNaN(n)) return null;
       if (isKR) {
-        if (n >= 1e12) return `${(n / 1e12).toFixed(1)}조원`;
+        if (n >= 1e12) return `${(n / 1e12).toFixed(2)}조원`;
         if (n >= 1e8) return `${(n / 1e8).toFixed(0)}억원`;
         return `${(n / 1e4).toFixed(0)}만원`;
       } else {
@@ -1766,73 +1755,109 @@ async function openDetail(ticker, market) {
       }
     };
 
-    const fsCells = [];
+    // 연간/분기 공통 셀 빌더
+    const buildCells = (data, isQuarter) => {
+      if (!data) return [];
+      const cells = [];
+      const revenue = isQuarter ? data.revenue_cumulative : data.revenue;
+      const opProfit = isQuarter ? data.operating_profit_cumulative : data.operating_profit;
+      const netProfit = isQuarter ? data.net_income_cumulative : data.net_income;
 
-    // 매출/이익
-    const revenue = fmtMoney(fs.revenue);
-    if (revenue) fsCells.push(`<div class="fin-cell"><div class="lbl">매출액</div><div class="val">${revenue}</div></div>`);
-    const opProfit = fmtMoney(fs.operatingProfit);
-    if (opProfit) fsCells.push(`<div class="fin-cell"><div class="lbl">영업이익</div><div class="val">${opProfit}</div></div>`);
-    const netProfit = fmtMoney(fs.netProfit);
-    if (netProfit) fsCells.push(`<div class="fin-cell"><div class="lbl">순이익</div><div class="val">${netProfit}</div></div>`);
+      const revenueStr = fmtMoney(revenue);
+      if (revenueStr) cells.push(`<div class="fin-cell"><div class="lbl">매출액</div><div class="val">${revenueStr}</div></div>`);
+      const opStr = fmtMoney(opProfit);
+      if (opStr) cells.push(`<div class="fin-cell"><div class="lbl">영업이익</div><div class="val">${opStr}</div></div>`);
+      const netStr = fmtMoney(netProfit);
+      if (netStr) cells.push(`<div class="fin-cell"><div class="lbl">순이익</div><div class="val">${netStr}</div></div>`);
 
-    // 수익성 지표
-    if (fs.roe != null) fsCells.push(`<div class="fin-cell"><div class="lbl">ROE</div><div class="val">${fmtNum(fs.roe, 2)}%</div></div>`);
-    if (fs.roa != null) fsCells.push(`<div class="fin-cell"><div class="lbl">ROA</div><div class="val">${fmtNum(fs.roa, 2)}%</div></div>`);
-    if (fs.profitMargin != null) fsCells.push(`<div class="fin-cell"><div class="lbl">순이익률</div><div class="val">${fmtNum(fs.profitMargin, 2)}%</div></div>`);
-    if (fs.operatingMargin != null) fsCells.push(`<div class="fin-cell"><div class="lbl">영업이익률</div><div class="val">${fmtNum(fs.operatingMargin, 2)}%</div></div>`);
+      // 수익성 (분기는 ROE/ROA 안 보여줌 — Worker가 누적기준 9개월이라 왜곡)
+      if (!isQuarter) {
+        if (data.roe != null) cells.push(`<div class="fin-cell"><div class="lbl">ROE</div><div class="val">${fmtNum(data.roe, 2)}%</div></div>`);
+        if (data.roa != null) cells.push(`<div class="fin-cell"><div class="lbl">ROA</div><div class="val">${fmtNum(data.roa, 2)}%</div></div>`);
+      }
+      if (data.operating_margin != null) cells.push(`<div class="fin-cell"><div class="lbl">영업이익률</div><div class="val">${fmtNum(data.operating_margin, 2)}%</div></div>`);
+      if (data.profit_margin != null) cells.push(`<div class="fin-cell"><div class="lbl">순이익률</div><div class="val">${fmtNum(data.profit_margin, 2)}%</div></div>`);
 
-    // 안정성 지표
-    if (fs.debtRatio != null) {
-      const debtVal = isKR ? `${fmtNum(fs.debtRatio, 1)}%` : fmtNum(fs.debtRatio, 2);
-      fsCells.push(`<div class="fin-cell"><div class="lbl">부채비율</div><div class="val">${debtVal}</div></div>`);
+      // 안정성
+      if (data.debt_ratio != null) cells.push(`<div class="fin-cell"><div class="lbl">부채비율</div><div class="val">${fmtNum(data.debt_ratio, 1)}%</div></div>`);
+
+      // 성장률 (전년 대비)
+      if (data.revenue_growth_yoy != null) {
+        const cls = data.revenue_growth_yoy > 0 ? 'up' : data.revenue_growth_yoy < 0 ? 'down' : 'flat';
+        cells.push(`<div class="fin-cell"><div class="lbl">매출 YoY</div><div class="val ${cls}">${fmtPct(data.revenue_growth_yoy)}</div></div>`);
+      }
+      if (data.profit_growth_yoy != null) {
+        const cls = data.profit_growth_yoy > 0 ? 'up' : data.profit_growth_yoy < 0 ? 'down' : 'flat';
+        cells.push(`<div class="fin-cell"><div class="lbl">영업이익 YoY</div><div class="val ${cls}">${fmtPct(data.profit_growth_yoy)}</div></div>`);
+      }
+      if (data.net_income_growth_yoy != null) {
+        const cls = data.net_income_growth_yoy > 0 ? 'up' : data.net_income_growth_yoy < 0 ? 'down' : 'flat';
+        cells.push(`<div class="fin-cell"><div class="lbl">순이익 YoY</div><div class="val ${cls}">${fmtPct(data.net_income_growth_yoy)}</div></div>`);
+      }
+
+      // 재무상태표
+      const ta = fmtMoney(data.total_assets);
+      if (ta) cells.push(`<div class="fin-cell"><div class="lbl">자산총계</div><div class="val">${ta}</div></div>`);
+      const tl = fmtMoney(data.total_liabilities);
+      if (tl) cells.push(`<div class="fin-cell"><div class="lbl">부채총계</div><div class="val">${tl}</div></div>`);
+      const te = fmtMoney(data.total_equity);
+      if (te) cells.push(`<div class="fin-cell"><div class="lbl">자본총계</div><div class="val">${te}</div></div>`);
+
+      return cells;
+    };
+
+    const sections = [];
+
+    // 📅 연간 섹션
+    if (fs.annual) {
+      const cells = buildCells(fs.annual, false);
+      if (cells.length > 0) {
+        const fsDivLabel = fs.annual.fs_div === 'CFS' ? '연결' : (fs.annual.fs_div === 'OFS' ? '별도' : '');
+        sections.push(`
+          <div class="fin-subsection">
+            <div class="fin-subtitle">📅 연간 — ${fs.annual.report_name || ''} ${fsDivLabel ? `<span class="fs-badge">${fsDivLabel}</span>` : ''}</div>
+            <div class="fin-grid">${cells.join('')}</div>
+            ${fs.annual.period ? `<div class="fin-period">${fs.annual.period}</div>` : ''}
+          </div>
+        `);
+      }
+    } else if (fs.errors && fs.errors.annual) {
+      sections.push(`
+        <div class="fin-subsection">
+          <div class="fin-subtitle">📅 연간</div>
+          <div class="fin-error">❌ 연간 데이터 가져오기 실패: ${fs.errors.annual}</div>
+        </div>
+      `);
     }
-    if (fs.currentRatio != null) fsCells.push(`<div class="fin-cell"><div class="lbl">유동비율</div><div class="val">${fmtNum(fs.currentRatio, 2)}</div></div>`);
-    if (fs.reserveRatio != null) fsCells.push(`<div class="fin-cell"><div class="lbl">유보율</div><div class="val">${fmtNum(fs.reserveRatio, 1)}%</div></div>`);
 
-    // 성장률
-    if (fs.revenueGrowth != null) {
-      const cls = fs.revenueGrowth > 0 ? 'up' : fs.revenueGrowth < 0 ? 'down' : 'flat';
-      fsCells.push(`<div class="fin-cell"><div class="lbl">매출 성장률</div><div class="val ${cls}">${fmtPct(fs.revenueGrowth)}</div></div>`);
-    }
-    if (fs.profitGrowth != null) {
-      const cls = fs.profitGrowth > 0 ? 'up' : fs.profitGrowth < 0 ? 'down' : 'flat';
-      fsCells.push(`<div class="fin-cell"><div class="lbl">이익 성장률</div><div class="val ${cls}">${fmtPct(fs.profitGrowth)}</div></div>`);
-    }
-
-    // 현금/부채 (미국)
-    const totalCash = fmtMoney(fs.totalCash);
-    if (totalCash) fsCells.push(`<div class="fin-cell"><div class="lbl">현금</div><div class="val">${totalCash}</div></div>`);
-    const totalDebt = fmtMoney(fs.totalDebt);
-    if (totalDebt) fsCells.push(`<div class="fin-cell"><div class="lbl">총부채</div><div class="val">${totalDebt}</div></div>`);
-
-    // DART 추가 정보 (한국 - 재무상태표)
-    const totalAssets = fmtMoney(fs.totalAssets);
-    if (totalAssets) fsCells.push(`<div class="fin-cell"><div class="lbl">자산총계</div><div class="val">${totalAssets}</div></div>`);
-    const totalLiab = fmtMoney(fs.totalLiabilities);
-    if (totalLiab) fsCells.push(`<div class="fin-cell"><div class="lbl">부채총계</div><div class="val">${totalLiab}</div></div>`);
-    const totalEquity = fmtMoney(fs.totalEquity);
-    if (totalEquity) fsCells.push(`<div class="fin-cell"><div class="lbl">자본총계</div><div class="val">${totalEquity}</div></div>`);
-
-    // 순이익 성장률
-    if (fs.netIncomeGrowth != null) {
-      const cls = fs.netIncomeGrowth > 0 ? 'up' : fs.netIncomeGrowth < 0 ? 'down' : 'flat';
-      fsCells.push(`<div class="fin-cell"><div class="lbl">순이익 성장률</div><div class="val ${cls}">${fmtPct(fs.netIncomeGrowth)}</div></div>`);
+    // 📅 최신 분기 섹션 (누적)
+    if (fs.latestQuarter) {
+      const cells = buildCells(fs.latestQuarter, true);
+      if (cells.length > 0) {
+        const fsDivLabel = fs.latestQuarter.fs_div === 'CFS' ? '연결' : (fs.latestQuarter.fs_div === 'OFS' ? '별도' : '');
+        sections.push(`
+          <div class="fin-subsection">
+            <div class="fin-subtitle">📅 최신 분기 — ${fs.latestQuarter.report_name || ''} <span class="fin-period-tag">누적</span> ${fsDivLabel ? `<span class="fs-badge">${fsDivLabel}</span>` : ''}</div>
+            <div class="fin-grid">${cells.join('')}</div>
+            ${fs.latestQuarter.period ? `<div class="fin-period">${fs.latestQuarter.period}</div>` : ''}
+          </div>
+        `);
+      }
+    } else if (fs.errors && fs.errors.latest_quarter) {
+      sections.push(`
+        <div class="fin-subsection">
+          <div class="fin-subtitle">📅 최신 분기</div>
+          <div class="fin-error">❌ 분기 데이터 가져오기 실패: ${fs.errors.latest_quarter}</div>
+        </div>
+      `);
     }
 
-    if (fsCells.length > 0) {
-      // 보고기간 표시
-      const reportLabel = fs.reportYear ? (() => {
-        const reportTypes = { '11013': '1분기', '11012': '반기', '11014': '3분기', '11011': '사업보고서' };
-        const type = reportTypes[fs.reportType] || fs.reportType;
-        return `📄 ${fs.reportYear}년 ${type} (DART 공시 기준)`;
-      })() : '최근 분기 기준';
-
+    if (sections.length > 0) {
       statementsHtml = `
         <div class="detail-section">
           <div class="detail-section-title">💼 재무제표</div>
-          <div class="fin-grid">${fsCells.join('')}</div>
-          <div style="margin-top:8px;font-size:11px;color:#94a3b8;text-align:right;">${reportLabel}</div>
+          ${sections.join('')}
+          <div style="margin-top:6px;font-size:11px;color:#94a3b8;text-align:right;">📄 DART 공시 기준</div>
         </div>
       `;
     }
