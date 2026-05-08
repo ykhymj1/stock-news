@@ -1,7 +1,7 @@
-// StockRadar Service Worker v18
-const CACHE = 'stockradar-v18';
+// StockRadar Service Worker v19 (V10 ELITE)
+const CACHE = 'stockradar-v19';
 const FILES = [
-  './index.html', './app.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
+  './index.html', './app.js', './v10.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
   './icon-192.png', './icon-512.png', './icon-180.png',
   './icon-32.png', './icon-16.png',
@@ -21,7 +21,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   // API/RSS 요청은 캐시 안 함 (항상 최신)
-  if (e.request.url.includes('allorigins') || e.request.url.includes('api.') || e.request.url.includes('rss') || e.request.url.includes('finance.yahoo')) {
+  if (e.request.url.includes('allorigins') || e.request.url.includes('api.') || e.request.url.includes('rss') ||
+      e.request.url.includes('finance.yahoo') || e.request.url.includes('/v10-') || e.request.url.includes('workers.dev')) {
     return;
   }
   e.respondWith(

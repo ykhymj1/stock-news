@@ -370,6 +370,250 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 ::-webkit-scrollbar{width:6px;}
 ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
 ::-webkit-scrollbar-track{background:transparent;}
+
+/* ========== V10 ELITE SECTION (NEW) ========== */
+.v10-section{padding:12px 16px 4px;}
+
+.v10-badge-card{
+  background:linear-gradient(135deg,#f59e0b,#ea580c);
+  border-radius:14px;padding:12px 14px;color:#fff;
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  box-shadow:0 4px 14px rgba(234,88,12,0.25);
+}
+.v10-badge-left{display:flex;align-items:center;gap:8px;}
+.v10-star{font-size:18px;}
+.v10-label{font-size:9px;letter-spacing:1.5px;font-weight:700;opacity:0.9;}
+.v10-stage{font-size:13px;font-weight:700;margin-top:1px;}
+.v10-badge-right{text-align:right;}
+.v10-winrate-label{font-size:9px;opacity:0.85;}
+.v10-winrate{font-size:14px;font-weight:700;margin-top:2px;}
+
+/* 미국 시장 영향 배너 */
+.v10-us-market{
+  background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;
+  padding:10px 12px;margin-top:8px;
+}
+.v10-us-market.bullish{background:#f0fdf4;border-color:#bbf7d0;}
+.v10-us-market.bearish{background:#fef2f2;border-color:#fecaca;}
+.v10-us-market.neutral{background:#f8fafc;border-color:#e2e8f0;}
+
+.v10-us-header{
+  display:flex;justify-content:space-between;align-items:center;
+  gap:8px;margin-bottom:8px;
+}
+.v10-us-mood{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#9a3412;}
+.v10-us-market.bullish .v10-us-mood{color:#15803d;}
+.v10-us-market.bearish .v10-us-mood{color:#991b1b;}
+.v10-us-market.neutral .v10-us-mood{color:#475569;}
+.v10-us-guide{
+  font-size:9px;font-weight:600;padding:2px 8px;
+  background:#fed7aa;color:#9a3412;border-radius:6px;
+}
+.v10-us-market.bullish .v10-us-guide{background:#bbf7d0;color:#15803d;}
+.v10-us-market.bearish .v10-us-guide{background:#fecaca;color:#991b1b;}
+.v10-us-market.neutral .v10-us-guide{background:#e2e8f0;color:#475569;}
+
+.v10-us-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:6px;
+}
+.v10-us-item{
+  background:#fff;border-radius:8px;padding:6px 10px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.v10-us-name{font-size:10px;color:#64748b;font-weight:600;}
+.v10-us-change{font-size:11px;font-weight:700;font-family:'DM Mono',monospace;}
+.v10-us-change.up{color:#dc2626;}
+.v10-us-change.down{color:#2563eb;}
+.v10-us-change.flat{color:#64748b;}
+
+/* 1순위 큰 카드 */
+.v10-top-card{
+  background:linear-gradient(135deg,#1e3a8a,#2563eb,#3b82f6);
+  border-radius:16px;padding:16px;color:#fff;margin-top:8px;
+  box-shadow:0 8px 24px rgba(37,99,235,0.25);
+}
+.v10-top-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;
+}
+.v10-top-header-left{display:flex;align-items:center;gap:6px;}
+.v10-rank-badge{
+  background:rgba(255,255,255,0.2);padding:3px 8px;border-radius:6px;
+  font-size:9px;font-weight:700;letter-spacing:0.5px;
+}
+.v10-buyback-badge{
+  background:#fbbf24;color:#78350f;padding:3px 8px;border-radius:6px;
+  font-size:9px;font-weight:700;
+}
+.v10-top-tag{font-size:11px;opacity:0.85;}
+
+.v10-top-name{font-size:22px;font-weight:800;line-height:1.1;}
+.v10-top-meta{font-size:11px;opacity:0.8;margin-top:2px;font-family:'DM Mono',monospace;}
+
+.v10-pattern-row{display:flex;gap:6px;margin-top:10px;}
+.v10-pattern-tag{
+  background:rgba(255,255,255,0.2);padding:4px 10px;border-radius:8px;
+  font-size:10px;font-weight:700;
+}
+
+/* 성공률/실패률 박스 */
+.v10-stats-box{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  margin-top:12px;padding:10px;
+  background:rgba(0,0,0,0.15);border-radius:12px;
+}
+.v10-stat{text-align:center;padding:4px 0;}
+.v10-stat:first-child{border-right:1px solid rgba(255,255,255,0.15);}
+.v10-stat-label{font-size:9px;opacity:0.85;letter-spacing:0.5px;}
+.v10-stat-value{
+  display:flex;align-items:baseline;justify-content:center;gap:2px;margin-top:2px;
+}
+.v10-stat-num{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;line-height:1;}
+.v10-stat-pct{font-size:11px;}
+.v10-stat.success .v10-stat-num,.v10-stat.success .v10-stat-pct{color:#4ade80;}
+.v10-stat.fail .v10-stat-num,.v10-stat.fail .v10-stat-pct{color:#fca5a5;}
+
+/* 추천 매수가 박스 */
+.v10-buy-box{
+  margin-top:10px;padding:12px;background:rgba(0,0,0,0.2);
+  border-radius:12px;border:1px solid rgba(251,191,36,0.4);
+}
+.v10-buy-header{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;
+}
+.v10-buy-title{
+  display:flex;align-items:center;gap:4px;
+  font-size:10px;font-weight:700;color:#fbbf24;letter-spacing:0.5px;
+}
+.v10-buy-range{
+  display:flex;align-items:baseline;gap:6px;justify-content:center;
+  font-family:'DM Mono',monospace;
+}
+.v10-buy-low,.v10-buy-high{font-size:19px;font-weight:700;color:#fff;}
+.v10-buy-tilde{font-size:12px;opacity:0.7;color:#fff;}
+.v10-buy-unit{font-size:11px;opacity:0.85;color:#fff;}
+.v10-buy-footer{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.15);
+  font-size:10px;
+}
+.v10-buy-current-label{opacity:0.75;}
+.v10-buy-current{font-weight:700;font-family:'DM Mono',monospace;}
+.v10-buy-status{
+  padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700;
+}
+.v10-buy-status.ok{background:rgba(74,222,128,0.25);color:#86efac;}
+.v10-buy-status.watch{background:rgba(251,191,36,0.25);color:#fcd34d;}
+.v10-buy-status.danger{background:rgba(248,113,113,0.3);color:#fca5a5;}
+.v10-buy-status.below{background:rgba(96,165,250,0.25);color:#93c5fd;}
+
+/* V10 점수 + 외국인/기관 */
+.v10-score-row{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.2);
+}
+.v10-score-label{font-size:9px;opacity:0.8;letter-spacing:0.5px;}
+.v10-score-value{font-size:26px;font-weight:700;font-family:'DM Mono',monospace;line-height:1;}
+.v10-flow-right{text-align:right;}
+.v10-flow-label{font-size:9px;opacity:0.8;}
+.v10-flow-value{font-size:12px;font-weight:700;font-family:'DM Mono',monospace;}
+
+/* 60일 가격 슬라이더 */
+.v10-position-box{
+  margin-top:12px;padding:10px 12px;
+  background:rgba(255,255,255,0.1);border-radius:10px;
+}
+.v10-position-title{
+  font-size:9px;opacity:0.85;letter-spacing:0.5px;font-weight:700;margin-bottom:6px;
+}
+.v10-position-bar{
+  position:relative;height:6px;background:rgba(255,255,255,0.2);
+  border-radius:3px;margin:8px 0;
+}
+.v10-position-dot{
+  position:absolute;top:50%;transform:translate(-50%,-50%);
+  width:12px;height:12px;border-radius:50%;border:2px solid #fff;
+}
+.v10-position-dot.green{background:#16a34a;}
+.v10-position-dot.blue{background:#2563eb;}
+.v10-position-dot.yellow{background:#fbbf24;}
+.v10-position-dot.red{background:#dc2626;}
+.v10-position-labels{
+  display:flex;justify-content:space-between;font-size:9px;opacity:0.85;
+}
+
+.v10-detail-btn{
+  width:100%;margin-top:12px;padding:10px;
+  background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+  border-radius:10px;color:#fff;font-size:12px;font-weight:700;
+  cursor:pointer;
+}
+.v10-detail-btn:active{background:rgba(255,255,255,0.25);}
+
+/* 빈 상태 */
+.v10-empty{
+  text-align:center;padding:32px 20px;background:#fff;
+  border:1px dashed #cbd5e1;border-radius:14px;margin-top:8px;
+}
+.v10-empty-icon{font-size:36px;margin-bottom:8px;}
+.v10-empty-title{font-size:14px;font-weight:700;color:#475569;}
+.v10-empty-desc{font-size:11px;color:#94a3b8;margin-top:4px;line-height:1.5;}
+.v10-refresh-btn{
+  margin-top:14px;padding:10px 20px;background:#2563eb;color:#fff;
+  border-radius:10px;font-size:12px;font-weight:700;display:inline-flex;
+  align-items:center;gap:6px;
+}
+.v10-refresh-btn:active{transform:scale(0.97);}
+
+/* 2~5순위 리스트 */
+.v10-rest{margin-top:8px;}
+.v10-rest-title{
+  font-size:10px;letter-spacing:1.5px;color:#64748b;font-weight:700;
+  padding:0 4px 8px;
+}
+.v10-rest-list{
+  background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;
+}
+.v10-rest-item{padding:12px;border-bottom:1px solid #f1f5f9;}
+.v10-rest-item:last-child{border-bottom:none;}
+.v10-rest-item:active{background:#f8fafc;}
+.v10-rest-row{display:flex;align-items:center;gap:10px;}
+.v10-rest-rank{
+  width:28px;height:28px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;
+}
+.v10-rest-rank.gold{background:#fef3c7;color:#92400e;}
+.v10-rest-rank.silver{background:#f1f5f9;color:#64748b;}
+.v10-rest-info{flex:1;min-width:0;}
+.v10-rest-name{font-size:13px;font-weight:700;}
+.v10-rest-meta{font-size:10px;color:#64748b;font-family:'DM Mono',monospace;margin-top:2px;}
+.v10-rest-score-box{text-align:right;}
+.v10-rest-score{font-size:15px;font-weight:700;font-family:'DM Mono',monospace;}
+.v10-rest-score-label{font-size:9px;color:#94a3b8;}
+
+.v10-rest-bottom{
+  margin-top:6px;padding-left:38px;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+.v10-rest-buy{font-size:10px;color:#64748b;font-family:'DM Mono',monospace;}
+.v10-rest-buy-icon{color:#ea580c;margin-right:3px;}
+.v10-rest-position{font-size:9px;color:#64748b;font-family:'DM Mono',monospace;}
+
+/* 매수 회피 배너 */
+.v10-avoid-banner{
+  background:#fef2f2;border:1px solid #fecaca;border-radius:10px;
+  padding:10px 12px;margin-top:12px;
+  display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;
+}
+.v10-avoid-banner:active{background:#fee2e2;}
+.v10-avoid-left{display:flex;align-items:center;gap:8px;}
+.v10-avoid-icon{font-size:18px;}
+.v10-avoid-title{font-size:11px;font-weight:700;color:#991b1b;}
+.v10-avoid-count{font-size:10px;color:#b91c1c;margin-top:1px;}
+.v10-avoid-arrow{font-size:18px;color:#b91c1c;font-weight:700;}
+
 </style>
 </head>
 <body>
@@ -398,9 +642,91 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 
   <!-- VIEW: TODAY -->
   <div id="view-today" class="view active">
-    <div class="hero-section">
+
+    <!-- V10 ELITE 정예 추천 섹션 (NEW) -->
+    <div id="v10Section" class="v10-section">
+      <!-- V10 ELITE 배지 -->
+      <div class="v10-badge-card">
+        <div class="v10-badge-left">
+          <span class="v10-star">⭐</span>
+          <div>
+            <div class="v10-label">V10 ELITE</div>
+            <div class="v10-stage" id="v10Stage">정예 추천</div>
+          </div>
+        </div>
+        <div class="v10-badge-right">
+          <div class="v10-winrate-label">백테스트 기준</div>
+          <div class="v10-winrate" id="v10WinRate">- 승률</div>
+        </div>
+      </div>
+
+      <!-- 미국 시장 영향 배너 -->
+      <div id="v10UsMarket" class="v10-us-market" style="display:none;">
+        <div class="v10-us-header">
+          <div class="v10-us-mood">
+            <span id="v10UsMoodIcon">⚪</span>
+            <span id="v10UsMoodText">미국 시장 데이터 로딩</span>
+          </div>
+          <div class="v10-us-guide" id="v10UsGuide">-</div>
+        </div>
+        <div class="v10-us-grid">
+          <div class="v10-us-item">
+            <span class="v10-us-name">S&P 500</span>
+            <span class="v10-us-change" id="v10UsSpx">-</span>
+          </div>
+          <div class="v10-us-item">
+            <span class="v10-us-name">나스닥</span>
+            <span class="v10-us-change" id="v10UsNdx">-</span>
+          </div>
+          <div class="v10-us-item">
+            <span class="v10-us-name">다우</span>
+            <span class="v10-us-change" id="v10UsDji">-</span>
+          </div>
+          <div class="v10-us-item">
+            <span class="v10-us-name">VIX</span>
+            <span class="v10-us-change" id="v10UsVix">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1순위 큰 카드 -->
+      <div id="v10TopCard" class="v10-top-card" style="display:none;">
+        <!-- JS로 동적 생성 -->
+      </div>
+
+      <!-- 빈 상태 표시 -->
+      <div id="v10Empty" class="v10-empty">
+        <div class="v10-empty-icon">📡</div>
+        <div class="v10-empty-title">V10 추천 대기 중</div>
+        <div class="v10-empty-desc">매일 21:00 (한국 마감 후)<br/>매일 08:00 (미국 마감 후)</div>
+        <button class="v10-refresh-btn" onclick="refreshV10()">
+          <span>↻</span> V10 추천 받기
+        </button>
+      </div>
+
+      <!-- 2~5순위 리스트 -->
+      <div id="v10Rest" class="v10-rest" style="display:none;">
+        <div class="v10-rest-title">2~5순위</div>
+        <div id="v10RestList" class="v10-rest-list"></div>
+      </div>
+
+      <!-- 매수 회피 시그널 -->
+      <div id="v10AvoidBanner" class="v10-avoid-banner" style="display:none;" onclick="openV10Avoidance()">
+        <div class="v10-avoid-left">
+          <span class="v10-avoid-icon">🛡️</span>
+          <div>
+            <div class="v10-avoid-title">매수 회피 시그널</div>
+            <div class="v10-avoid-count" id="v10AvoidCount">0개 종목</div>
+          </div>
+        </div>
+        <span class="v10-avoid-arrow">›</span>
+      </div>
+    </div>
+
+    <!-- 기존 Hero 섹션 (뉴스/공시 분석) -->
+    <div class="hero-section" style="margin-top:14px;">
       <div class="hero-card">
-        <div class="hero-label">📅 오늘의 추천</div>
+        <div class="hero-label">📅 뉴스/공시 분석</div>
         <div class="hero-date" id="heroDate">-</div>
         <div class="hero-summary">
           <div class="num" id="heroCount">0</div>
@@ -616,9 +942,10 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 
 <input type="file" id="importFile" accept=".json" style="display:none;" onchange="handleImport(event)"/>
 
-<script src="kr_stocks.js?v=20260506g"></script>
-<script src="us_stocks.js?v=20260506g"></script>
-<script src="stock_info.js?v=20260506g"></script>
-<script src="app.js?v=20260506g"></script>
+<script src="kr_stocks.js?v=20260508v10"></script>
+<script src="us_stocks.js?v=20260508v10"></script>
+<script src="stock_info.js?v=20260508v10"></script>
+<script src="app.js?v=20260508v10"></script>
+<script src="v10.js?v=20260508v10"></script>
 </body>
 </html>

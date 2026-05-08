@@ -2566,7 +2566,10 @@ function switchView(view) {
   document.getElementById(`view-${view}`).classList.add('active');
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
 
-  if (view === 'today') renderToday();
+  if (view === 'today') {
+    renderToday();
+    if (typeof renderV10 === 'function') renderV10();
+  }
   else if (view === 'tracking') {
     refreshTrackedPrices().then(renderTracking);
     renderTracking();
@@ -2580,10 +2583,14 @@ function switchMarket(market) {
   saveState();
   document.querySelectorAll('.mkt-tab').forEach(t => t.classList.toggle('active', t.dataset.market === market));
   renderToday();
+  if (typeof renderV10 === 'function') renderV10();
 }
 
 function refreshData() {
-  if (STATE.view === 'today') analyzeNow();
+  if (STATE.view === 'today') {
+    analyzeNow();
+    if (typeof refreshV10 === 'function') refreshV10();
+  }
   else if (STATE.view === 'tracking') updateAllPrices();
   else if (STATE.view === 'history') renderHistory();
 }
@@ -2695,5 +2702,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       openDetail(ticker, market);
     }, 1000);
+  }
+
+  // V10 ELITE 시스템 초기화 (NEW)
+  if (typeof initV10 === 'function') {
+    initV10();
   }
 });
