@@ -497,8 +497,8 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
   margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.15);
   font-size:10px;
 }
-.v10-buy-current-label{opacity:0.75;}
-.v10-buy-current{font-weight:700;font-family:'DM Mono',monospace;}
+.v10-buy-current-label{opacity:0.75;color:#fff;}
+.v10-buy-current{font-weight:700;font-family:'DM Mono',monospace;color:#fff;}
 .v10-buy-status{
   padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700;
 }
@@ -506,6 +506,35 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 .v10-buy-status.watch{background:rgba(251,191,36,0.25);color:#fcd34d;}
 .v10-buy-status.danger{background:rgba(248,113,113,0.3);color:#fca5a5;}
 .v10-buy-status.below{background:rgba(96,165,250,0.25);color:#93c5fd;}
+
+/* 예상 매도가 박스 (NEW) */
+.v10-sell-box{
+  margin-top:8px;padding:12px;background:rgba(34,197,94,0.15);
+  border-radius:12px;border:1px solid rgba(34,197,94,0.4);
+}
+.v10-sell-header{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;
+}
+.v10-sell-title{
+  font-size:10px;font-weight:700;color:#86efac;letter-spacing:0.5px;
+}
+.v10-sell-range{
+  display:flex;align-items:baseline;gap:6px;justify-content:center;
+  font-family:'DM Mono',monospace;
+}
+.v10-sell-price{font-size:19px;font-weight:700;color:#fff;}
+.v10-sell-unit{font-size:11px;opacity:0.85;color:#fff;}
+.v10-sell-return{
+  font-size:13px;font-weight:700;color:#86efac;margin-left:6px;
+  background:rgba(34,197,94,0.2);padding:2px 6px;border-radius:4px;
+}
+.v10-sell-footer{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1);
+  font-size:10px;color:#fca5a5;
+}
+.v10-stop-loss-label{opacity:0.85;}
+.v10-stop-loss{font-weight:700;font-family:'DM Mono',monospace;}
 
 /* V10 점수 + 외국인/기관 */
 .v10-score-row{
@@ -942,10 +971,10 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 
 <input type="file" id="importFile" accept=".json" style="display:none;" onchange="handleImport(event)"/>
 
-<script src="kr_stocks.js?v=20260508v10"></script>
-<script src="us_stocks.js?v=20260508v10"></script>
-<script src="stock_info.js?v=20260508v10"></script>
-<script src="app.js?v=20260508v10"></script>
-<script src="v10.js?v=20260508v10"></script>
+<script src="kr_stocks.js?v=20260509v2"></script>
+<script src="us_stocks.js?v=20260509v2"></script>
+<script src="stock_info.js?v=20260509v2"></script>
+<script src="app.js?v=20260509v2"></script>
+<script src="v10.js?v=20260509v2"></script>
 </body>
 </html>

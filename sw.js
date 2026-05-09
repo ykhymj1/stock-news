@@ -1,5 +1,5 @@
 // StockRadar Service Worker v19 (V10 ELITE)
-const CACHE = 'stockradar-v19';
+const CACHE = 'stockradar-v20';
 const FILES = [
   './index.html', './app.js', './v10.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
