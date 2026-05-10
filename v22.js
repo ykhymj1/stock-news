@@ -89,14 +89,20 @@ function getV22Stars(expectedWr) {
 // 메인 렌더 함수 - V22 섹션 그리기
 // ============================================
 async function renderV22() {
-  const data = await fetchV22Recommendations();
-  
   // 한국 시장만 V22 지원
   const market = (typeof STATE !== 'undefined' && STATE.market) || 'kr';
+  
+  // 시장 탭 전환 처리
+  const sec = document.getElementById('v22Section');
   if (market !== 'kr') {
-    showV22NotAvailable();
+    if (sec) sec.style.display = 'none';
     return;
   }
+  
+  // 한국 시장 - V22 섹션 다시 보이게
+  if (sec) sec.style.display = '';
+  
+  const data = await fetchV22Recommendations();
   
   // 데이터 없음
   if (!data || !data.ok) {
