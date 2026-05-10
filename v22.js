@@ -653,3 +653,503 @@ if (document.readyState === 'loading') {
     };
   }
 })();
+
+
+// ============================================
+// 🆕 V22 검색 평가 기능 (v6.11)
+// 사용자가 종목명/티커를 입력하고 매수가(선택) 입력 → V22 평가 결과 모달 표시
+// ============================================
+
+// 종목명 → 티커 변환 (kr_stocks.js의 KR_STOCKS / KR_CODE_TO_NAME 사용)
+function v22ResolveTicker(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  
+  // 6자리 티커
+  if (/^\d{6}$/.test(s)) {
+    const name = (window.KR_CODE_TO_NAME && window.KR_CODE_TO_NAME[s]) || '';
+    return { ticker: s, name };
+  }
+  
+  // 종목명 (정확 매칭 → 부분 매칭)
+  const dict = window.KR_STOCKS || {};
+  if (dict[s]) {
+    return { ticker: dict[s], name: s };
+  }
+  
+  // 대소문자 무시 + 공백 제거 매칭
+  const sLower = s.toLowerCase().replace(/\s/g, '');
+  for (const [name, code] of Object.entries(dict)) {
+    if (name.toLowerCase().replace(/\s/g, '') === sLower) {
+      return { ticker: code, name };
+    }
+  }
+  
+  // 부분 매칭 (포함)
+  for (const [name, code] of Object.entries(dict)) {
+    if (name.includes(s)) {
+      return { ticker: code, name };
+    }
+  }
+  
+  return null;
+}
+
+// 자동완성 후보 검색 (최대 8개)
+function v22SuggestStocks(query) {
+  if (!query || query.length < 1) return [];
+  const dict = window.KR_STOCKS || {};
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+  const results = [];
+  const seen = new Set();
+  
+  // 6자리 코드 입력 시
+  if (/^\d{1,6}$/.test(q)) {
+    const codeMap = window.KR_CODE_TO_NAME || {};
+    for (const code of Object.keys(codeMap)) {
+      if (code.startsWith(q)) {
+        if (seen.has(code)) continue;
+        seen.add(code);
+        results.push({ ticker: code, name: codeMap[code] });
+        if (results.length >= 8) break;
+      }
+    }
+    return results;
+  }
+  
+  // 종목명 prefix 매칭 우선
+  for (const [name, code] of Object.entries(dict)) {
+    if (seen.has(code)) continue;
+    if (name.startsWith(q) || name.toLowerCase().startsWith(qLower)) {
+      seen.add(code);
+      results.push({ ticker: code, name });
+      if (results.length >= 8) break;
+    }
+  }
+  
+  // 부분 매칭으로 보충
+  if (results.length < 8) {
+    for (const [name, code] of Object.entries(dict)) {
+      if (seen.has(code)) continue;
+      if (name.includes(q) || name.toLowerCase().includes(qLower)) {
+        seen.add(code);
+        results.push({ ticker: code, name });
+        if (results.length >= 8) break;
+      }
+    }
+  }
+  
+  return results;
+}
+
+// 자동완성 표시
+function onV22SearchInput(event) {
+  const value = event.target.value;
+  const suggest = document.getElementById('v22EvalSuggest');
+  if (!suggest) return;
+  
+  if (!value || value.length < 1) {
+    suggest.style.display = 'none';
+    suggest.innerHTML = '';
+    return;
+  }
+  
+  const items = v22SuggestStocks(value);
+  if (items.length === 0) {
+    suggest.style.display = 'none';
+    return;
+  }
+  
+  suggest.innerHTML = items.map(it => `
+    <div class="v22-suggest-item" onclick="selectV22Suggest('${it.ticker}','${escapeHtmlV22(it.name)}')">
+      <span class="v22-suggest-name">${escapeHtmlV22(it.name)}</span>
+      <span class="v22-suggest-code">${it.ticker}</span>
+    </div>
+  `).join('');
+  suggest.style.display = 'block';
+}
+
+function selectV22Suggest(ticker, name) {
+  const input = document.getElementById('v22EvalTickerInput');
+  if (input) input.value = name;
+  input.dataset.resolvedTicker = ticker;
+  const suggest = document.getElementById('v22EvalSuggest');
+  if (suggest) {
+    suggest.style.display = 'none';
+    suggest.innerHTML = '';
+  }
+}
+
+function onV22SearchKeydown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    runV22Evaluate();
+  } else if (event.key === 'Escape') {
+    const suggest = document.getElementById('v22EvalSuggest');
+    if (suggest) suggest.style.display = 'none';
+  }
+}
+
+// 외부 클릭 시 자동완성 닫기
+document.addEventListener('click', function(e) {
+  const wrap = document.querySelector('.v22-search-row-wrap');
+  const suggest = document.getElementById('v22EvalSuggest');
+  if (wrap && suggest && !wrap.contains(e.target)) {
+    suggest.style.display = 'none';
+  }
+});
+
+function escapeHtmlV22(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
+// 메인: 평가 실행
+async function runV22Evaluate() {
+  const tickerInput = document.getElementById('v22EvalTickerInput');
+  const priceInput = document.getElementById('v22EvalPriceInput');
+  const btn = document.getElementById('v22EvalSearchBtn');
+  
+  if (!tickerInput) return;
+  const rawInput = tickerInput.value.trim();
+  if (!rawInput) {
+    alert('종목명 또는 티커를 입력해주세요');
+    return;
+  }
+  
+  // 1) 자동완성에서 선택한 티커 우선
+  let resolved = null;
+  if (tickerInput.dataset.resolvedTicker) {
+    resolved = {
+      ticker: tickerInput.dataset.resolvedTicker,
+      name: rawInput,
+    };
+  } else {
+    resolved = v22ResolveTicker(rawInput);
+  }
+  
+  if (!resolved) {
+    alert(`"${rawInput}" 종목을 찾을 수 없습니다.\n종목명을 정확히 입력하거나 6자리 티커를 입력해주세요.`);
+    return;
+  }
+  
+  // 2) 매수가 처리 (선택)
+  let buyPrice = 0;
+  if (priceInput && priceInput.value) {
+    buyPrice = parseFloat(priceInput.value);
+    if (isNaN(buyPrice) || buyPrice < 0) buyPrice = 0;
+  }
+  
+  // 3) 모달 열고 로딩 표시
+  openV22EvalModal();
+  renderV22EvalLoading(resolved.name, resolved.ticker);
+  
+  if (btn) btn.disabled = true;
+  
+  // 4) Worker 호출
+  try {
+    const proxyUrl = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl)
+      || 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+    let url = `${proxyUrl}/v22-evaluate?ticker=${resolved.ticker}`;
+    if (buyPrice > 0) url += `&buy_price=${buyPrice}`;
+    
+    const res = await fetch(url, { cache: 'no-cache' });
+    const data = await res.json();
+    
+    if (!res.ok || data.error) {
+      renderV22EvalError(data.error || `HTTP ${res.status}`);
+      return;
+    }
+    
+    renderV22EvalResult(data);
+  } catch (e) {
+    console.error('[V22 Evaluate] error:', e);
+    renderV22EvalError(e.message || '네트워크 오류');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function openV22EvalModal() {
+  const m = document.getElementById('v22EvalModal');
+  if (m) m.classList.add('show');
+}
+
+function closeV22EvalModal() {
+  const m = document.getElementById('v22EvalModal');
+  if (m) m.classList.remove('show');
+}
+
+function closeV22EvalModalOnBg(event) {
+  if (event.target.id === 'v22EvalModal') closeV22EvalModal();
+}
+
+function renderV22EvalLoading(name, ticker) {
+  const body = document.getElementById('v22EvalBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="v22-eval-loading">
+      <div class="v22-eval-spinner"></div>
+      <div><b>${escapeHtmlV22(name)}</b> (${ticker}) 평가 중...</div>
+      <div style="margin-top:6px;font-size:11px;">KIS API + DART + 뉴스 분석 (최대 10초)</div>
+    </div>
+  `;
+}
+
+function renderV22EvalError(msg) {
+  const body = document.getElementById('v22EvalBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="v22-eval-error">
+      ❌ ${escapeHtmlV22(msg)}
+    </div>
+  `;
+}
+
+// 환경 라벨
+const V22_REGIME_LABEL_FULL = {
+  strong_bear: { emoji: '🔴', label: '강한 하락장' },
+  bear: { emoji: '🔴', label: '하락장' },
+  sideways: { emoji: '⚪', label: '횡보장' },
+  bull: { emoji: '🟢', label: '상승장' },
+  strong_bull: { emoji: '🟢', label: '강한 상승장' },
+  unknown: { emoji: '❓', label: '환경 분석 중' },
+};
+
+function renderV22EvalResult(data) {
+  const body = document.getElementById('v22EvalBody');
+  if (!body) return;
+  
+  if (!data.found) {
+    body.innerHTML = `<div class="v22-eval-error">❌ ${escapeHtmlV22(data.error || '데이터 조회 실패')}</div>`;
+    return;
+  }
+  
+  let html = '';
+  
+  // 헤더 (종목명 + 현재가)
+  html += `
+    <div class="v22-eval-stock-name">${escapeHtmlV22(data.name || data.ticker)}</div>
+    <div class="v22-eval-stock-meta">
+      ${data.ticker} · 현재가 ${(data.current_price || 0).toLocaleString()}원
+      ${data.change_pct != null ? ` · ${data.change_pct >= 0 ? '+' : ''}${data.change_pct.toFixed(2)}%` : ''}
+    </div>
+  `;
+  
+  // 시장 환경
+  const regimeKey = (data.regime && data.regime.regime) || 'unknown';
+  const regimeInfo = V22_REGIME_LABEL_FULL[regimeKey] || V22_REGIME_LABEL_FULL.unknown;
+  const ret60d = data.regime && data.regime.ret_60d;
+  html += `
+    <div class="v22-eval-section">
+      <div class="v22-eval-section-title">📊 시장 환경</div>
+      <div class="v22-eval-row">
+        <span class="v22-eval-row-label">현재 환경</span>
+        <span class="v22-eval-row-value">${regimeInfo.emoji} ${regimeInfo.label}${ret60d != null ? ` (${ret60d >= 0 ? '+' : ''}${ret60d.toFixed(1)}%)` : ''}</span>
+      </div>
+    </div>
+  `;
+  
+  // V22 매칭 결과
+  if (data.v22_match && data.v22) {
+    const v = data.v22;
+    const tierName = (typeof V22_TIER_NAME !== 'undefined' && V22_TIER_NAME[v.tier]) || v.tier;
+    const stars = v.expected_wr >= 95 ? '⭐⭐⭐⭐' :
+                  v.expected_wr >= 90 ? '⭐⭐⭐' :
+                  v.expected_wr >= 85 ? '⭐⭐' : '⭐';
+    
+    html += `
+      <div class="v22-eval-section" style="background:linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%);border:1px solid #c4b5fd;">
+        <div class="v22-eval-section-title" style="color:#5b21b6;">🌟 V22 패턴 매칭 ${stars}</div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">패턴</span>
+          <span class="v22-eval-row-value">${v.tier} · ${escapeHtmlV22(tierName)}</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">예상 승률</span>
+          <span class="v22-eval-row-value green">${v.expected_wr}%</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">V22 점수</span>
+          <span class="v22-eval-row-value">${v.v22_score}</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">추천 매수가</span>
+          <span class="v22-eval-row-value">${v.buy_price_low.toLocaleString()}~${v.buy_price_high.toLocaleString()}원</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">추천 매도가 (목표)</span>
+          <span class="v22-eval-row-value green">${v.target_price.toLocaleString()}원 (+${v.tp_pct}%)</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">손절가</span>
+          <span class="v22-eval-row-value red">${v.stop_price.toLocaleString()}원 (-5%)</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">예상 보유 기간</span>
+          <span class="v22-eval-row-value">${v.hold_days}일</span>
+        </div>
+      </div>
+    `;
+  } else {
+    html += `
+      <div class="v22-eval-warning">
+        ⚠️ ${escapeHtmlV22(data.v22_no_match_reason || 'V22 추천 패턴 미매칭')}
+        <div style="font-size:11px;margin-top:4px;">현재 시장 환경에서 80%+ 승률 패턴에 해당하지 않습니다. 아래 지표는 참고용입니다.</div>
+      </div>
+    `;
+  }
+  
+  // 사용자 매수가 분석 (있을 경우)
+  if (data.user_buy_analysis) {
+    const u = data.user_buy_analysis;
+    if (u.grade) {
+      const colorClass = u.grade_color || 'amber';
+      html += `
+        <div class="v22-eval-grade-card ${colorClass}">
+          <div class="v22-eval-grade-stars">${u.grade_stars}</div>
+          <div class="v22-eval-grade-label">${escapeHtmlV22(u.grade_label)}</div>
+        </div>
+        <div class="v22-eval-section">
+          <div class="v22-eval-section-title">💰 매수가 ${u.buy_price.toLocaleString()}원 기준 손익</div>
+          <div class="v22-eval-row">
+            <span class="v22-eval-row-label">목표가 도달 시 수익</span>
+            <span class="v22-eval-row-value ${u.expected_profit_pct >= 0 ? 'green' : 'red'}">
+              ${u.expected_profit_pct >= 0 ? '+' : ''}${u.expected_profit_pct.toFixed(2)}% (${u.expected_profit_won >= 0 ? '+' : ''}${u.expected_profit_won.toLocaleString()}원)
+            </span>
+          </div>
+          <div class="v22-eval-row">
+            <span class="v22-eval-row-label">손절 시 손실</span>
+            <span class="v22-eval-row-value red">${u.max_loss_pct.toFixed(2)}% (${u.max_loss_won.toLocaleString()}원)</span>
+          </div>
+          <div class="v22-eval-row">
+            <span class="v22-eval-row-label">V22 추천가 대비</span>
+            <span class="v22-eval-row-value">${u.vs_v22_low_pct >= 0 ? '+' : ''}${u.vs_v22_low_pct.toFixed(1)}% / ${u.vs_v22_high_pct >= 0 ? '+' : ''}${u.vs_v22_high_pct.toFixed(1)}%</span>
+          </div>
+          <div class="v22-eval-row">
+            <span class="v22-eval-row-label">예상 보유</span>
+            <span class="v22-eval-row-value">${u.hold_days}일 (예상 승률 ${u.expected_wr}%)</span>
+          </div>
+        </div>
+      `;
+    } else if (u.note) {
+      // V22 미매칭 - 단순 정보만
+      html += `
+        <div class="v22-eval-section">
+          <div class="v22-eval-section-title">💰 매수가 ${u.buy_price.toLocaleString()}원</div>
+          <div class="v22-eval-row">
+            <span class="v22-eval-row-label">현재가 대비</span>
+            <span class="v22-eval-row-value">${u.vs_current_pct >= 0 ? '+' : ''}${u.vs_current_pct.toFixed(2)}%</span>
+          </div>
+          <div class="v22-eval-row" style="font-size:11px;color:#6b7280;">
+            ${escapeHtmlV22(u.note)}
+          </div>
+        </div>
+      `;
+    }
+  }
+  
+  // 60일 위치 + 핵심 지표
+  if (data.indicators) {
+    const ind = data.indicators;
+    html += `
+      <div class="v22-eval-section">
+        <div class="v22-eval-section-title">📈 핵심 지표 (60일 기준)</div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">60일 고점 대비</span>
+          <span class="v22-eval-row-value ${ind.from_high60 <= -30 ? 'red' : ''}">${ind.from_high60 >= 0 ? '+' : ''}${ind.from_high60.toFixed(1)}%</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">60일 저점 대비</span>
+          <span class="v22-eval-row-value">${ind.from_low60 >= 0 ? '+' : ''}${ind.from_low60.toFixed(1)}%</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">5일 수익률</span>
+          <span class="v22-eval-row-value ${ind.ret_5d >= 0 ? 'green' : 'red'}">${ind.ret_5d >= 0 ? '+' : ''}${ind.ret_5d.toFixed(1)}%</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">20일 변동성</span>
+          <span class="v22-eval-row-value">${ind.volatility.toFixed(2)}</span>
+        </div>
+        <div class="v22-eval-row">
+          <span class="v22-eval-row-label">시장 동조 (vs KOSPI)</span>
+          <span class="v22-eval-row-value ${ind.relative_to_market >= 0 ? 'green' : 'red'}">${ind.relative_to_market >= 0 ? '+' : ''}${ind.relative_to_market.toFixed(1)}%</span>
+        </div>
+      </div>
+    `;
+  }
+  
+  // 4단계 안전망 결과
+  if (data.filters) {
+    const f = data.filters;
+    const hasIssue = f.financial_blocked || f.dart_blocked || f.news_blocked;
+    
+    html += `<div class="v22-eval-section">`;
+    html += `<div class="v22-eval-section-title">🔍 4단계 안전망 검증</div>`;
+    
+    // 재무
+    html += `
+      <div class="v22-eval-row">
+        <span class="v22-eval-row-label">재무 부실</span>
+        <span class="v22-eval-row-value ${f.financial_blocked ? 'red' : 'green'}">
+          ${f.financial_blocked ? '❌ 블랙리스트' : '✅ 정상'}
+        </span>
+      </div>
+    `;
+    if (f.financial_blocked && f.financial_reasons.length) {
+      html += `<div style="font-size:11px;color:#dc2626;padding:2px 0 6px;">└ ${f.financial_reasons.join(', ')}</div>`;
+    }
+    
+    // DART
+    html += `
+      <div class="v22-eval-row">
+        <span class="v22-eval-row-label">DART 공시 (30일)</span>
+        <span class="v22-eval-row-value ${f.dart_blocked ? 'red' : (f.has_buyback ? 'green' : '')}">
+          ${f.dart_blocked ? '❌ 차단' : (f.has_buyback ? '⭐ 자사주매입' : `📋 ${f.dart_filings_count}건`)}
+        </span>
+      </div>
+    `;
+    if (f.dart_warnings && f.dart_warnings.length) {
+      html += `<div style="font-size:11px;color:#d97706;padding:2px 0 6px;">└ ${f.dart_warnings.join(', ')}</div>`;
+    }
+    if (f.dart_strongest_negative) {
+      html += `<div style="font-size:11px;color:#dc2626;padding:2px 0 6px;">└ ⚠️ ${escapeHtmlV22(f.dart_strongest_negative.label || '')}</div>`;
+    }
+    if (f.dart_strongest_positive) {
+      html += `<div style="font-size:11px;color:#16a34a;padding:2px 0 6px;">└ ✅ ${escapeHtmlV22(f.dart_strongest_positive.label || '')}</div>`;
+    }
+    
+    // 뉴스
+    html += `
+      <div class="v22-eval-row">
+        <span class="v22-eval-row-label">뉴스 (호재/악재)</span>
+        <span class="v22-eval-row-value ${f.news_blocked ? 'red' : (f.news_score > 0 ? 'green' : '')}">
+          ${f.news_blocked ? '❌ 강한 악재' : (f.news_count > 0 ? `📰 ${f.news_count}건 (${f.news_score >= 0 ? '+' : ''}${f.news_score})` : '없음')}
+        </span>
+      </div>
+    `;
+    
+    // 종합
+    html += `
+      <div class="v22-eval-row" style="border-top:1px solid #e5e7eb;margin-top:6px;padding-top:8px;">
+        <span class="v22-eval-row-label" style="font-weight:700;">종합</span>
+        <span class="v22-eval-row-value ${hasIssue ? 'red' : 'green'}">
+          ${hasIssue ? '⚠️ 위험 신호 있음' : '✅ 안전망 통과'}
+        </span>
+      </div>
+    `;
+    
+    html += `</div>`;
+  }
+  
+  // 푸터
+  html += `
+    <div style="text-align:center;font-size:10px;color:#9ca3af;padding:12px 0 0;">
+      V22 v6.11 · 백테스트 412건 84.2%<br>
+      ⚠️ 투자 판단은 본인 책임
+    </div>
+  `;
+  
+  body.innerHTML = html;
+}

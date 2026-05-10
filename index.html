@@ -571,6 +571,122 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 .v22-blocked-count{font-size:10px;color:#b91c1c;margin-top:1px;}
 .v22-blocked-arrow{font-size:18px;color:#b91c1c;font-weight:700;}
 
+/* 🆕 V22 검색 평가 (v6.11) */
+.v22-search-card{
+  background:linear-gradient(135deg,#eff6ff 0%,#e0e7ff 100%);
+  border:1px solid #c7d2fe;
+  border-radius:12px;
+  padding:12px;
+  margin-bottom:12px;
+}
+.v22-search-title{
+  font-size:11px;font-weight:700;color:#3730a3;letter-spacing:1px;
+  margin-bottom:8px;display:flex;align-items:center;gap:6px;
+}
+.v22-search-row{display:flex;gap:6px;}
+.v22-search-input{
+  flex:1;padding:9px 10px;border:1px solid #c7d2fe;border-radius:8px;
+  font-size:13px;background:#fff;outline:none;font-family:inherit;
+}
+.v22-search-input:focus{border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,0.15);}
+.v22-search-input.price-input{flex:0.7;font-family:'DM Mono',monospace;}
+.v22-search-btn{
+  padding:9px 14px;background:#4f46e5;color:#fff;border:none;border-radius:8px;
+  font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;
+}
+.v22-search-btn:active{background:#3730a3;}
+.v22-search-btn:disabled{background:#a5b4fc;cursor:not-allowed;}
+.v22-search-hint{
+  font-size:10px;color:#6366f1;margin-top:6px;line-height:1.4;
+}
+
+/* V22 검색 결과 모달 */
+.v22-eval-modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;
+  display:none;align-items:flex-end;justify-content:center;
+}
+.v22-eval-modal-overlay.show{display:flex;}
+.v22-eval-modal{
+  background:#fff;width:100%;max-width:480px;max-height:90vh;
+  border-radius:16px 16px 0 0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+}
+.v22-eval-header{
+  position:sticky;top:0;background:#fff;border-bottom:1px solid #e5e7eb;
+  padding:14px 16px;display:flex;justify-content:space-between;align-items:center;z-index:1;
+}
+.v22-eval-title{font-size:16px;font-weight:800;color:#111827;}
+.v22-eval-close{
+  font-size:20px;background:none;border:none;color:#6b7280;cursor:pointer;
+  width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+}
+.v22-eval-body{padding:14px 16px 24px;}
+.v22-eval-stock-name{
+  font-size:20px;font-weight:800;color:#111827;margin-bottom:2px;
+}
+.v22-eval-stock-meta{
+  font-size:12px;color:#6b7280;margin-bottom:14px;font-family:'DM Mono',monospace;
+}
+.v22-eval-section{
+  background:#f9fafb;border-radius:10px;padding:12px;margin-bottom:10px;
+}
+.v22-eval-section-title{
+  font-size:11px;font-weight:700;color:#374151;letter-spacing:1px;margin-bottom:8px;
+}
+.v22-eval-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:4px 0;font-size:13px;
+}
+.v22-eval-row-label{color:#6b7280;}
+.v22-eval-row-value{font-weight:700;color:#111827;font-family:'DM Mono',monospace;}
+.v22-eval-row-value.green{color:#16a34a;}
+.v22-eval-row-value.red{color:#dc2626;}
+.v22-eval-row-value.amber{color:#d97706;}
+.v22-eval-row-value.orange{color:#ea580c;}
+
+.v22-eval-grade-card{
+  border-radius:12px;padding:14px;text-align:center;margin-bottom:10px;
+}
+.v22-eval-grade-card.green{background:linear-gradient(135deg,#d1fae5 0%,#a7f3d0 100%);border:1px solid #6ee7b7;}
+.v22-eval-grade-card.amber{background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #fcd34d;}
+.v22-eval-grade-card.orange{background:linear-gradient(135deg,#fed7aa 0%,#fdba74 100%);border:1px solid #fb923c;}
+.v22-eval-grade-card.red{background:linear-gradient(135deg,#fee2e2 0%,#fecaca 100%);border:1px solid #fca5a5;}
+.v22-eval-grade-stars{font-size:22px;margin-bottom:4px;}
+.v22-eval-grade-label{font-size:14px;font-weight:700;color:#111827;}
+
+.v22-eval-warning{
+  background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;
+  padding:10px 12px;margin-bottom:10px;font-size:12px;color:#92400e;
+}
+.v22-eval-error{
+  background:#fee2e2;border-left:3px solid #dc2626;border-radius:6px;
+  padding:10px 12px;font-size:13px;color:#991b1b;
+}
+.v22-eval-loading{
+  text-align:center;padding:40px 20px;color:#6b7280;font-size:13px;
+}
+.v22-eval-spinner{
+  width:32px;height:32px;border:3px solid #e5e7eb;border-top-color:#4f46e5;
+  border-radius:50%;animation:v22spin 0.8s linear infinite;margin:0 auto 12px;
+}
+@keyframes v22spin{to{transform:rotate(360deg);}}
+
+/* 검색 자동완성 */
+.v22-search-suggest{
+  background:#fff;border:1px solid #e5e7eb;border-radius:8px;
+  margin-top:4px;max-height:200px;overflow-y:auto;
+  position:absolute;left:0;right:0;z-index:50;
+  box-shadow:0 4px 12px rgba(0,0,0,0.08);
+}
+.v22-suggest-item{
+  padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f3f4f6;
+}
+.v22-suggest-item:last-child{border-bottom:none;}
+.v22-suggest-item:active{background:#eff6ff;}
+.v22-suggest-name{font-weight:600;color:#111827;}
+.v22-suggest-code{font-size:11px;color:#6b7280;font-family:'DM Mono',monospace;margin-left:6px;}
+.v22-search-row-wrap{position:relative;}
+
+
 </style>
 </head>
 <body>
@@ -614,6 +730,37 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
         <div class="v22-badge-right">
           <div class="v22-winrate-label">백테스트 3년</div>
           <div class="v22-winrate">84.2% 승률</div>
+        </div>
+      </div>
+
+      <!-- 🆕 V22 검색 평가 (v6.11) -->
+      <div class="v22-search-card">
+        <div class="v22-search-title">🔍 V22 종목 평가 (관심 종목 직접 입력)</div>
+        <div class="v22-search-row-wrap">
+          <div class="v22-search-row">
+            <input
+              id="v22EvalTickerInput"
+              class="v22-search-input"
+              type="text"
+              placeholder="종목명 또는 6자리 티커"
+              autocomplete="off"
+              oninput="onV22SearchInput(event)"
+              onkeydown="onV22SearchKeydown(event)"
+            />
+            <input
+              id="v22EvalPriceInput"
+              class="v22-search-input price-input"
+              type="number"
+              inputmode="numeric"
+              placeholder="매수가(선택)"
+              onkeydown="onV22SearchKeydown(event)"
+            />
+            <button class="v22-search-btn" id="v22EvalSearchBtn" onclick="runV22Evaluate()">평가</button>
+          </div>
+          <div id="v22EvalSuggest" class="v22-search-suggest" style="display:none;"></div>
+        </div>
+        <div class="v22-search-hint">
+          한국 종목만 지원. 매수가 입력 시 V22 추천가 대비 등급 + 예상 수익 표시
         </div>
       </div>
 
@@ -860,12 +1007,25 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<!-- 🆕 V22 평가 결과 모달 (v6.11) -->
+<div class="v22-eval-modal-overlay" id="v22EvalModal" onclick="closeV22EvalModalOnBg(event)">
+  <div class="v22-eval-modal">
+    <div class="v22-eval-header">
+      <div class="v22-eval-title">🌟 V22 종목 평가 결과</div>
+      <button class="v22-eval-close" onclick="closeV22EvalModal()">✕</button>
+    </div>
+    <div class="v22-eval-body" id="v22EvalBody">
+      <!-- 동적 생성 -->
+    </div>
+  </div>
+</div>
+
 <input type="file" id="importFile" accept=".json" style="display:none;" onchange="handleImport(event)"/>
 
 <script src="kr_stocks.js?v=20260509v2"></script>
 <script src="us_stocks.js?v=20260509v2"></script>
 <script src="stock_info.js?v=20260509v2"></script>
 <script src="app.js?v=20260509v2"></script>
-<script src="v22.js?v=20260510"></script>
+<script src="v22.js?v=20260511"></script>
 </body>
 </html>

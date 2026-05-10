@@ -1,5 +1,5 @@
-// StockRadar Service Worker v23 (V22 RECOMMEND only)
-const CACHE = 'stockradar-v23';
+// StockRadar Service Worker v24 (V22 v6.11 - 검색 평가 추가)
+const CACHE = 'stockradar-v24';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
