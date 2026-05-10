@@ -668,6 +668,15 @@ input,select,textarea{font-family:'Noto Sans KR',sans-serif;font-size:16px;}
       </div>
     </div>
 
+    <!-- app.js 호환용 숨겨진 더미 요소 (V22 단독 운영 시 app.js renderToday 에러 방지) -->
+    <div style="display:none;">
+      <span id="heroDate"></span>
+      <span id="heroCount"></span>
+      <span id="topBadge"></span>
+      <div id="topList"></div>
+      <div id="extraList"></div>
+    </div>
+
   </div>
 
   <!-- VIEW: TRACKING -->
