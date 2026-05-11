@@ -2,7 +2,7 @@
 // V22 RECOMMEND 모듈 - StockRadar 환경별 패턴 추천 시스템
 // ============================================
 // 백엔드 데이터: Worker /v22-recommend 엔드포인트
-// 백테스트: 3년 412건, 통합 84.2% 승률, +수익 92.5%
+// 백테스트: 5년 1082건, 통합 81.2% 승률, +수익 92.5%
 // 보수적 운영: 80%+ 패턴만 사용, 없으면 "추천 없음"
 // ============================================
 
@@ -23,24 +23,32 @@ const V22_REGIME_INFO = {
   unknown: { emoji: '❓', label: '환경 분석 중' },
 };
 
-// V22 Tier 한글명
+// V22 Tier 한글명 (V22++++++ 5년 백테스트 81.2% 검증)
 const V22_TIER_NAME = {
-  // 강한 하락장
+  // 🔴 강한 하락장 (n=85, 82.4%, +19.13%)
+  'SB_R20_30_STRICT': '강한 하락 + 폭락 반등',
+  // 🔴 하락장 (n=82, 81.7%, +9.32%)
+  'B_PRI_DEEP': '깊은 조정 (50%+ 폭락)',
+  // ⚪ 횡보장 (n=28, 82.1%, +0.74%)
+  'SW_VOL': '변동성 압축',
+  // 🟢 상승장 (n=40, 77.5%, +0.07%)
+  'BU_BIG_DROP': '5일 급락 반등',
+  // 🟢 강한 상승장 - 신규 (n=22, 90.9%, +3.15%) ⭐
+  'SB_A_PEAK': '강한 상승장·고점 반등',
+  // 🟢 강한 상승장 (n=825, 81.0%, +2.15%)
+  'SB_S_30': '강한 상승장·30% 조정',
+  
+  // 옛 Tier (호환성 - 혹시 옛 데이터 표시 시)
   'U1_PEAK': '갭다운 + 60일 폭락',
   'U1': '60일 폭락 (안전망)',
   'S1_LOW': '저점 근처 + 60일 폭락',
   'EXT': '극단 폭락',
-  // 하락장
   'B_PRI': '가격 폭락 우선',
-  // 강한 상승장
   'SB_U_VOL': '60일 폭락 + 변동성 압축',
   'SB_U_GAP': '60일 폭락 + 갭다운',
   'SB_U': '60일 폭락 (조정)',
   'SB_S_35': '강한 조정 (35%+)',
-  // 상승장
   'B_PRI_VOL': '가격 폭락 + 변동성 압축',
-  // 횡보장
-  'SW_VOL': '변동성 압축',
 };
 
 // ============================================
@@ -540,7 +548,7 @@ function showV22DetailModal(item) {
   
   html += `
     <div style="font-size:10px;color:#94a3b8;text-align:center;line-height:1.5;margin-top:14px;">
-      ⚠️ 백테스트 기반 추천 (3년 412건 검증)<br/>
+      ⚠️ 백테스트 기반 추천 (5년 1082건 검증)<br/>
       손절가 -5%, 보유 기간 ${item.hold_days}영업일 권장
     </div>
   `;
@@ -549,7 +557,7 @@ function showV22DetailModal(item) {
   // 모달 열기
   document.getElementById('modalTitle').textContent = `🌟 V22 추천`;
   document.getElementById('modalSubtitle').innerHTML = 
-    `${(V22_REGIME_INFO[item.regime] || {}).label || ''} · ${item.tier} · 백테스트 84.2%`;
+    `${(V22_REGIME_INFO[item.regime] || {}).label || ''} · ${item.tier} · 백테스트 81.2%`;
   document.getElementById('modalBody').innerHTML = html;
   document.getElementById('detailModal').classList.add('active');
 }
@@ -1146,7 +1154,7 @@ function renderV22EvalResult(data) {
   // 푸터
   html += `
     <div style="text-align:center;font-size:10px;color:#9ca3af;padding:12px 0 0;">
-      V22 v6.11 · 백테스트 412건 84.2%<br>
+      V22 v6.11 · 백테스트 1082건 81.2%<br>
       ⚠️ 투자 판단은 본인 책임
     </div>
   `;
