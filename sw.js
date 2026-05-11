@@ -1,5 +1,5 @@
-// StockRadar Service Worker v24 (V22 v6.11 - 검색 평가 추가)
-const CACHE = 'stockradar-v24';
+// StockRadar Service Worker v25 (V22 v6.11 - 검색 모바일 UI 가로 오버플로우 수정)
+const CACHE = 'stockradar-v25';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
