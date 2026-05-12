@@ -1787,6 +1787,16 @@ async function fetchV10RecentData() {
 // V10 데이터에서 특정 종목의 뉴스 추출
 // 다양한 필드명에 방어적으로 대응 (news_items / matched_news / news / items)
 async function fetchV10NewsForTicker(ticker, stockName) {
+  // 0순위: /recent-alerts에서 텔레그램 발송된 뉴스 직접 조회
+  //         (RSS 분석으로 만든 알림 → KV 7일 보존)
+  try {
+    const fromAlert = await fetchRecentAlertForTicker(ticker);
+    if (fromAlert) return [fromAlert];
+  } catch (e) {
+    console.warn('[V10 뉴스] recent-alerts 조회 실패', e);
+  }
+  
+  // 1순위 폴백: /v10-recommend의 추천 객체 안 news_items
   const data = await fetchV10RecentData();
   if (!data) return [];
   
@@ -1827,17 +1837,91 @@ async function fetchV10NewsForTicker(ticker, stockName) {
   }).filter(n => n.title && n.title.length >= 4);
 }
 
-// 뉴스 호재/악재 배지
+
+// /recent-alerts에서 ticker별 최근 V10 알림 (Worker가 KV에 7일 보존)
+async function fetchRecentAlertForTicker(ticker) {
+  if (!ticker || !/^[0-9A-Z]{6}$/i.test(ticker)) return null;
+  
+  const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl)
+    ? STATE.settings.newsProxyUrl
+    : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+  
+  const url = newsProxy.replace(/\/$/, '') + '/recent-alerts?ticker=' + encodeURIComponent(ticker);
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) return null;  // 404 포함 - 알림 이력 없음
+  
+  const data = await r.json();
+  if (!data || !data.ok || !data.alert) return null;
+  
+  const a = data.alert;
+  const title = String(a.title || '').trim();
+  if (!title) return null;
+  
+  // matched는 ['+인수', '+확대'] 같은 키워드 배열
+  // 부호로 호재/악재 판단 (- 시작은 악재, + 시작은 호재)
+  const matched = Array.isArray(a.matched) ? a.matched : [];
+  const hasNeg = matched.some(k => typeof k === 'string' && k.startsWith('-'));
+  const hasPos = matched.some(k => typeof k === 'string' && k.startsWith('+'));
+  
+  // 점수 매핑 (worker analyzeImpact와 호환)
+  let impact_score = null;
+  if (typeof a.score === 'number') {
+    impact_score = a.score;  // 1~10
+  }
+  
+  return {
+    title: title,
+    link: a.link || '',
+    source: a.source || '뉴스',
+    date: formatV22Date(a.publishedAt) || '',
+    impact_score: impact_score,
+    type: hasNeg ? 'negative' : (hasPos ? 'positive' : ''),
+    keywords: matched,
+  };
+}
+
+// 날짜 짧게 포맷 (2026-05-12T13:00:00Z → "5/12 22:00")
+function formatV22Date(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    // KST 표시
+    const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+    const mm = kst.getUTCMonth() + 1;
+    const dd = kst.getUTCDate();
+    const hh = String(kst.getUTCHours()).padStart(2, '0');
+    const mi = String(kst.getUTCMinutes()).padStart(2, '0');
+    return `${mm}/${dd} ${hh}:${mi}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+// 뉴스 호재/악재 배지 (워커 알림의 score 1~10 또는 type 모두 처리)
 function renderV22NewsImpactBadge(n) {
   if (!n) return '';
-  if (n.type === 'strong_negative' || (typeof n.impact_score === 'number' && n.impact_score <= 2)) {
-    return `<span style="display:inline-block;padding:1px 6px;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;color:#b91c1c;font-size:9px;font-weight:700;">⚠️ 악재${n.keyword ? '·' + escapeHtml(n.keyword) : ''}</span>`;
+  const score = (typeof n.impact_score === 'number') ? n.impact_score : null;
+  const keywordsArr = Array.isArray(n.keywords) ? n.keywords.slice(0, 3) : [];
+  const keywordsStr = keywordsArr.length ? ' · ' + escapeHtml(keywordsArr.join(', ')) : (n.keyword ? ' · ' + escapeHtml(n.keyword) : '');
+  
+  // 강한 부정
+  if (n.type === 'strong_negative' || n.type === 'negative' || (score !== null && score <= 2)) {
+    const label = score !== null ? `⚠️ 악재 ${score}/10` : '⚠️ 악재';
+    return `<span style="display:inline-block;padding:1px 6px;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;color:#b91c1c;font-size:9px;font-weight:700;">${label}${keywordsStr}</span>`;
   }
-  if (typeof n.impact_score === 'number' && n.impact_score >= 8) {
-    return '<span style="display:inline-block;padding:1px 6px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;color:#15803d;font-size:9px;font-weight:700;">✅ 호재</span>';
+  // 강한 호재
+  if (n.type === 'positive' || (score !== null && score >= 8)) {
+    const label = score !== null ? `✅ 호재 ${score}/10` : '✅ 호재';
+    return `<span style="display:inline-block;padding:1px 6px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;color:#15803d;font-size:9px;font-weight:700;">${label}${keywordsStr}</span>`;
   }
-  if (typeof n.impact_score === 'number' && n.impact_score <= 4) {
-    return '<span style="display:inline-block;padding:1px 6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;color:#c2410c;font-size:9px;font-weight:700;">주의</span>';
+  // 약한 부정
+  if (score !== null && score <= 4) {
+    return `<span style="display:inline-block;padding:1px 6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;color:#c2410c;font-size:9px;font-weight:700;">주의 ${score}/10${keywordsStr}</span>`;
+  }
+  // 키워드만 있고 점수 모호
+  if (keywordsArr.length > 0) {
+    return `<span style="display:inline-block;padding:1px 6px;background:#f1f5f9;border:1px solid #e5e7eb;border-radius:4px;color:#475569;font-size:9px;font-weight:600;">${escapeHtml(keywordsArr.join(', '))}</span>`;
   }
   return '';
 }
