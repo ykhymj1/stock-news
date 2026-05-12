@@ -405,10 +405,23 @@ function showV22NotAvailable() {
 // V22 상세 모달
 // ============================================
 async function openV22ItemDetail(tickerInput) {
-  // ⚠️ 입력값 안전성 보장 - 항상 string으로 변환
-  const ticker = String(tickerInput || '').trim();
+  // ⚠️ 입력값 안전성 - 객체로 들어오면 ticker 속성 추출
+  let safeInput = tickerInput;
+  if (typeof safeInput === 'object' && safeInput !== null) {
+    safeInput = safeInput.ticker || safeInput.name || '';
+  }
+  const ticker = String(safeInput || '').trim();
+  
+  console.log('[openV22ItemDetail] input:', tickerInput, '→ ticker:', ticker);
+  
   if (!ticker) {
     console.warn('[openV22ItemDetail] 빈 입력');
+    return;
+  }
+  
+  // [object Object] 같은 잘못된 형식 방어
+  if (ticker === '[object Object]' || ticker.includes('[object')) {
+    console.error('[openV22ItemDetail] 잘못된 형식:', ticker);
     return;
   }
   
