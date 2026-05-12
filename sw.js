@@ -1,5 +1,5 @@
-// StockRadar Service Worker v32 (V22++++++ - V10 알림뉴스 통합)
-const CACHE = 'stockradar-v32';
+// StockRadar Service Worker v33 (V22++++++ - 추적 버튼 추가)
+const CACHE = 'stockradar-v33';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',

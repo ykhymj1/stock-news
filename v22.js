@@ -585,6 +585,9 @@ function showV22DetailModal(item) {
     </div>
   `;
   
+  // 🆕 추적 시작 버튼
+  html += renderV22TrackBtn(item);
+  
   // V22 패턴 검증
   html += `
     <div style="background:#ede9fe;border:1px solid #c4b5fd;border-radius:12px;padding:12px;margin-bottom:14px;">
@@ -1371,6 +1374,9 @@ function showV22DetailModalSimple(item) {
     </div>
   `;
   
+  // 🆕 추적 시작 버튼
+  html += renderV22TrackBtn(item);
+  
   // 회사 정보 + 재무 + 뉴스 (비동기 로드 placeholder)
   html += `
     <div id="v22ExtraInfo" style="margin-bottom:14px;">
@@ -2023,3 +2029,294 @@ function parseNaverFinanceNews(html) {
     checkUrlAndOpen();
   }
 })();
+
+
+// ============================================
+// 🆕 V22 모달용 추적 버튼 (app.js의 STATE.tracking + toggleTrack 재활용)
+// ============================================
+
+// 추적 버튼 HTML 생성 (V22 모달 헤더 직후에 삽입)
+function renderV22TrackBtn(item) {
+  const ticker = String(item && item.ticker || '').trim();
+  const name = String(item && item.name || ticker).trim();
+  const market = String(item && item.market || 'KOSPI').toLowerCase();
+  // app.js의 market 표기는 'kr'/'us' 소문자 - 변환
+  const m = (market === 'kospi' || market === 'kosdaq' || market === 'kr') ? 'kr' : 'us';
+  
+  const isTracked = (typeof STATE !== 'undefined' && Array.isArray(STATE.tracking))
+    ? STATE.tracking.some(t => t.ticker === ticker && t.market === m)
+    : false;
+  
+  const label = isTracked ? '✅ 추적중 · 해제' : '📌 추적 시작';
+  const bgColor = isTracked ? '#dcfce7' : '#fff7ed';
+  const textColor = isTracked ? '#15803d' : '#c2410c';
+  const borderColor = isTracked ? '#86efac' : '#fed7aa';
+  
+  // 안전한 onclick - 따옴표 이스케이프
+  const safeName = (name || '').replace(/['\\]/g, '\\$&');
+  
+  return `
+    <button id="v22TrackBtn" 
+            onclick="v22HandleTrack('${ticker}','${m}','${safeName}')"
+            style="width:100%;padding:11px;background:${bgColor};border:1px solid ${borderColor};border-radius:10px;color:${textColor};font-size:13px;font-weight:700;cursor:pointer;margin-bottom:14px;">
+      ${label}
+    </button>
+  `;
+}
+
+// 추적 토글 + 버튼 상태 업데이트
+async function v22HandleTrack(ticker, market, name) {
+  if (typeof toggleTrack !== 'function') {
+    if (typeof showToast === 'function') showToast('추적 기능을 사용할 수 없습니다');
+    return;
+  }
+  // app.js의 toggleTrack은 #trackBtn id를 직접 갱신함 - 우리 버튼 id 다르니 직접 처리
+  const idx = STATE.tracking.findIndex(t => t.ticker === ticker && t.market === market);
+  
+  if (idx >= 0) {
+    if (!confirm(`${name} 추적을 중단하시겠어요?`)) return;
+    STATE.tracking.splice(idx, 1);
+    if (typeof saveState === 'function') saveState();
+    if (typeof showToast === 'function') showToast('추적 중단됨');
+    v22UpdateTrackBtn(ticker, market);
+    return;
+  }
+  
+  // 추적 시작 - 시세 가져와서 추가
+  if (typeof showToast === 'function') showToast('시세 가져오는 중...');
+  
+  let priceData = null;
+  try {
+    if (typeof fetchPrice === 'function') {
+      priceData = await fetchPrice(ticker, market);
+    }
+  } catch (e) {
+    console.warn('[V22 Track] fetchPrice fail', e);
+  }
+  
+  if (!priceData) {
+    if (typeof showToast === 'function') showToast('❌ 시세를 가져올 수 없습니다');
+    return;
+  }
+  
+  STATE.tracking.push({
+    ticker, name, market,
+    addedDate: new Date().toISOString(),
+    addedPrice: priceData.price,
+    currentPrice: priceData.price,
+    currency: priceData.currency,
+    prices: [{ ts: new Date().toISOString(), price: priceData.price }],
+  });
+  if (typeof saveState === 'function') saveState();
+  if (typeof showToast === 'function') showToast(`✅ ${name} 추적 시작`);
+  v22UpdateTrackBtn(ticker, market);
+}
+
+// 버튼 라벨/스타일 갱신
+function v22UpdateTrackBtn(ticker, market) {
+  const btn = document.getElementById('v22TrackBtn');
+  if (!btn) return;
+  
+  const isTracked = STATE.tracking.some(t => t.ticker === ticker && t.market === market);
+  if (isTracked) {
+    btn.textContent = '✅ 추적중 · 해제';
+    btn.style.background = '#dcfce7';
+    btn.style.borderColor = '#86efac';
+    btn.style.color = '#15803d';
+  } else {
+    btn.textContent = '📌 추적 시작';
+    btn.style.background = '#fff7ed';
+    btn.style.borderColor = '#fed7aa';
+    btn.style.color = '#c2410c';
+  }
+}
+
+
+// ============================================
+// 🆕 추적 화면에서 종목 직접 추가 (모달)
+// ============================================
+
+function openV22AddTrackModal() {
+  if (typeof document === 'undefined') return;
+  
+  // 기존 모달 있으면 제거
+  const old = document.getElementById('v22AddTrackOverlay');
+  if (old) old.remove();
+  
+  const overlay = document.createElement('div');
+  overlay.id = 'v22AddTrackOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  
+  overlay.innerHTML = `
+    <div style="background:#fff;width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:20px;max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div style="font-size:17px;font-weight:700;color:#111827;">📌 추적 종목 추가</div>
+        <button onclick="document.getElementById('v22AddTrackOverlay').remove()" 
+                style="background:none;border:none;font-size:22px;color:#94a3b8;cursor:pointer;">×</button>
+      </div>
+      
+      <div style="font-size:12px;color:#64748b;margin-bottom:10px;">종목명 또는 6자리 티커 입력</div>
+      
+      <input type="text" id="v22AddTrackInput" placeholder="예: 삼성전자 또는 005930"
+             autocomplete="off"
+             style="width:100%;padding:12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;box-sizing:border-box;margin-bottom:10px;"
+             oninput="v22OnAddTrackInput(event)"
+             onkeydown="v22OnAddTrackKeydown(event)"/>
+      
+      <div id="v22AddTrackSuggest" style="margin-bottom:14px;"></div>
+      
+      <div style="display:flex;gap:8px;">
+        <button onclick="document.getElementById('v22AddTrackOverlay').remove()"
+                style="flex:1;padding:11px;background:#f1f5f9;border:1px solid #e5e7eb;border-radius:10px;color:#475569;font-size:13px;font-weight:600;cursor:pointer;">
+          취소
+        </button>
+        <button onclick="v22SubmitAddTrack()"
+                style="flex:2;padding:11px;background:#7c3aed;border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">
+          ✅ 추적 시작
+        </button>
+      </div>
+      
+      <div style="font-size:10px;color:#94a3b8;text-align:center;margin-top:14px;line-height:1.5;">
+        💡 한국 종목만 자동완성 지원<br/>
+        해외 종목은 6자리 티커 직접 입력
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    const input = document.getElementById('v22AddTrackInput');
+    if (input) input.focus();
+  }, 50);
+}
+
+// 입력 시 자동완성
+function v22OnAddTrackInput(event) {
+  const q = (event.target.value || '').trim();
+  const box = document.getElementById('v22AddTrackSuggest');
+  if (!box) return;
+  
+  if (!q || q.length < 1) {
+    box.innerHTML = '';
+    return;
+  }
+  
+  // v22SuggestStocks 재활용 (기존 자동완성 함수)
+  if (typeof v22SuggestStocks !== 'function') {
+    box.innerHTML = '';
+    return;
+  }
+  
+  const suggestions = v22SuggestStocks(q).slice(0, 6);
+  if (suggestions.length === 0) {
+    box.innerHTML = '';
+    return;
+  }
+  
+  box.innerHTML = suggestions.map(s => `
+    <div onclick="v22PickAddTrack('${s.code}','${(s.name || '').replace(/['\\]/g, '\\$&')}')"
+         style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px;cursor:pointer;background:#fff;">
+      <div style="font-size:13px;font-weight:600;color:#111827;">${escapeHtmlV22(s.name)}</div>
+      <div style="font-size:10px;color:#94a3b8;font-family:monospace;margin-top:2px;">${s.code}</div>
+    </div>
+  `).join('');
+}
+
+// 자동완성 클릭 -> 입력창 채우기
+function v22PickAddTrack(ticker, name) {
+  const input = document.getElementById('v22AddTrackInput');
+  if (input) {
+    input.value = name;
+    input.dataset.ticker = ticker;
+    input.dataset.name = name;
+  }
+  const box = document.getElementById('v22AddTrackSuggest');
+  if (box) box.innerHTML = '';
+}
+
+// 엔터로 제출
+function v22OnAddTrackKeydown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    v22SubmitAddTrack();
+  }
+}
+
+// 최종 추가 실행
+async function v22SubmitAddTrack() {
+  const input = document.getElementById('v22AddTrackInput');
+  if (!input) return;
+  
+  let ticker = input.dataset.ticker || '';
+  let name = input.dataset.name || '';
+  const rawQuery = (input.value || '').trim();
+  
+  // 사용자가 자동완성 안 쓰고 직접 입력한 경우
+  if (!ticker) {
+    // 6자리 영숫자면 그대로 ticker로 사용
+    if (/^[0-9A-Z]{6}$/i.test(rawQuery)) {
+      ticker = rawQuery.toUpperCase();
+      name = (window.KR_CODE_TO_NAME && window.KR_CODE_TO_NAME[ticker]) || ticker;
+    } else {
+      // 한국 종목명 1회 검색
+      if (typeof v22ResolveTicker === 'function') {
+        const resolved = v22ResolveTicker(rawQuery);
+        if (resolved && resolved.ticker) {
+          ticker = resolved.ticker;
+          name = resolved.name || rawQuery;
+        }
+      }
+    }
+  }
+  
+  if (!ticker || !/^[0-9A-Z]{6}$/i.test(ticker)) {
+    if (typeof showToast === 'function') showToast('❌ 종목을 찾을 수 없습니다');
+    return;
+  }
+  if (!name) name = ticker;
+  
+  // 시장 판단 - 6자리 숫자만이면 한국, 알파벳 포함이면 미국
+  const market = /^\d{6}$/.test(ticker) ? 'kr' : 'us';
+  
+  // 이미 추적 중이면 안내만
+  if (Array.isArray(STATE.tracking) && STATE.tracking.some(t => t.ticker === ticker && t.market === market)) {
+    if (typeof showToast === 'function') showToast('이미 추적 중인 종목입니다');
+    const overlay = document.getElementById('v22AddTrackOverlay');
+    if (overlay) overlay.remove();
+    return;
+  }
+  
+  // 시세 가져오기 + 추가
+  if (typeof showToast === 'function') showToast('시세 가져오는 중...');
+  
+  let priceData = null;
+  try {
+    if (typeof fetchPrice === 'function') {
+      priceData = await fetchPrice(ticker, market);
+    }
+  } catch (e) {
+    console.warn('[V22 AddTrack] fetchPrice fail', e);
+  }
+  
+  if (!priceData) {
+    if (typeof showToast === 'function') showToast('❌ 시세를 가져올 수 없습니다');
+    return;
+  }
+  
+  STATE.tracking.push({
+    ticker, name, market,
+    addedDate: new Date().toISOString(),
+    addedPrice: priceData.price,
+    currentPrice: priceData.price,
+    currency: priceData.currency,
+    prices: [{ ts: new Date().toISOString(), price: priceData.price }],
+  });
+  if (typeof saveState === 'function') saveState();
+  if (typeof showToast === 'function') showToast(`✅ ${name} 추적 시작`);
+  
+  // 모달 닫고 추적 리스트 새로고침
+  const overlay = document.getElementById('v22AddTrackOverlay');
+  if (overlay) overlay.remove();
+  if (typeof renderTracking === 'function') renderTracking();
+}
