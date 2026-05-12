@@ -1036,12 +1036,50 @@ async function fetchPrice(ticker, market = 'kr') {
   const worker = STATE.settings.workerUrl;
   const newsProxy = STATE.settings.newsProxyUrl;
   const isKR = market === 'kr';
-  const tk = isKR ? `${ticker}.KS` : ticker;
-
-  // 1) Try Cloudflare Worker (Yahoo v8 chart)
-  if (worker) {
+  
+  // === KR 종목: Naver 우선 (코스피/코스닥 구분 불필요, 실시간성 좋음) ===
+  if (isKR && worker) {
     try {
-      const r = await fetch(`${worker}/?yh=${encodeURIComponent(tk)}`, { signal: AbortSignal.timeout(8000) });
+      const r = await fetch(`${worker}/?nv=${encodeURIComponent(ticker)}`, { signal: AbortSignal.timeout(6000) });
+      if (r.ok) {
+        const j = await r.json();
+        const cur = parseFloat((j.closePrice || j.now || '').toString().replace(/,/g, ''));
+        if (cur > 0) {
+          let prev = cur;
+          if (j.compareToPreviousPrice) {
+            const sign = j.compareToPreviousPrice.code === '2' ? 1 : (j.compareToPreviousPrice.code === '5' ? -1 : 0);
+            const diff = parseFloat((j.comparePreviousClosePrice || '0').toString().replace(/,/g, ''));
+            prev = cur - (sign * diff);
+          }
+          return { price: cur, prev: prev || cur, currency: 'KRW' };
+        }
+      }
+    } catch (e) {}
+    
+    // KR Yahoo 보조 - 코스피(.KS) → 코스닥(.KQ) 순서로 시도
+    for (const suffix of ['.KS', '.KQ']) {
+      try {
+        const tk = ticker + suffix;
+        const r = await fetch(`${worker}/?yh=${encodeURIComponent(tk)}`, { signal: AbortSignal.timeout(6000) });
+        if (r.ok) {
+          const j = await r.json();
+          const m = j?.chart?.result?.[0]?.meta;
+          if (m?.regularMarketPrice > 0) {
+            return {
+              price: m.regularMarketPrice,
+              prev: m.chartPreviousClose || m.regularMarketPrice,
+              currency: m.currency || 'KRW',
+            };
+          }
+        }
+      } catch (e) {}
+    }
+  }
+  
+  // === US 종목: Yahoo (티커 그대로) ===
+  if (!isKR && worker) {
+    try {
+      const r = await fetch(`${worker}/?yh=${encodeURIComponent(ticker)}`, { signal: AbortSignal.timeout(8000) });
       if (r.ok) {
         const j = await r.json();
         const m = j?.chart?.result?.[0]?.meta;
@@ -1049,46 +1087,32 @@ async function fetchPrice(ticker, market = 'kr') {
           return {
             price: m.regularMarketPrice,
             prev: m.chartPreviousClose || m.regularMarketPrice,
-            currency: m.currency || (isKR ? 'KRW' : 'USD'),
+            currency: m.currency || 'USD',
           };
         }
       }
     } catch (e) {}
-    // Naver for KR
-    if (isKR) {
-      try {
-        const r = await fetch(`${worker}/?nv=${encodeURIComponent(ticker)}`, { signal: AbortSignal.timeout(6000) });
-        if (r.ok) {
-          const j = await r.json();
-          const cur = parseFloat((j.closePrice || j.now || '').toString().replace(/,/g, ''));
-          if (cur > 0) {
-            let prev = cur;
-            if (j.compareToPreviousPrice) {
-              const sign = j.compareToPreviousPrice.code === '2' ? 1 : (j.compareToPreviousPrice.code === '5' ? -1 : 0);
-              const diff = parseFloat((j.comparePreviousClosePrice || '0').toString().replace(/,/g, ''));
-              prev = cur - (sign * diff);
-            }
-            return { price: cur, prev: prev || cur, currency: 'KRW' };
-          }
-        }
-      } catch (e) {}
-    }
   }
 
-  // 2) Fallback: direct allorigins proxy
-  try {
-    const yUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${tk}?interval=1d&range=1d`;
-    const txt = await fetchProxy(yUrl, 8000);
-    const j = JSON.parse(txt);
-    const m = j?.chart?.result?.[0]?.meta;
-    if (m?.regularMarketPrice > 0) {
-      return {
-        price: m.regularMarketPrice,
-        prev: m.chartPreviousClose || m.regularMarketPrice,
-        currency: m.currency || (isKR ? 'KRW' : 'USD'),
-      };
-    }
-  } catch (e) {}
+  // 2) Fallback: direct allorigins proxy (Yahoo)
+  //    KR이면 .KS와 .KQ 둘 다 시도
+  const yahooSuffixes = isKR ? ['.KS', '.KQ'] : [''];
+  for (const suffix of yahooSuffixes) {
+    try {
+      const tk = ticker + suffix;
+      const yUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${tk}?interval=1d&range=1d`;
+      const txt = await fetchProxy(yUrl, 8000);
+      const j = JSON.parse(txt);
+      const m = j?.chart?.result?.[0]?.meta;
+      if (m?.regularMarketPrice > 0) {
+        return {
+          price: m.regularMarketPrice,
+          prev: m.chartPreviousClose || m.regularMarketPrice,
+          currency: m.currency || (isKR ? 'KRW' : 'USD'),
+        };
+      }
+    } catch (e) {}
+  }
 
   // 3) KR 추가 폴백: Naver basic API 활용
   if (isKR && newsProxy) {
@@ -2289,9 +2313,14 @@ function showTrackingDetail(ticker, market) {
     <div class="detail-section">
       <div class="detail-section-title">📊 추적 결과</div>
       <div class="fin-grid">
-        <div class="fin-cell">
+        <div class="fin-cell" style="position:relative;">
           <div class="lbl">추천 시점 가격</div>
           <div class="val">${sym}${fmtNum(t.addedPrice, t.currency === 'KRW' ? 0 : 2)}</div>
+          <button onclick="editAddedPrice('${ticker}','${market}')"
+                  title="추천 시점 가격 수정 (실제 매수가 등)"
+                  style="position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;color:#94a3b8;font-size:14px;padding:2px 6px;line-height:1;">
+            ✏️
+          </button>
         </div>
         <div class="fin-cell">
           <div class="lbl">현재 가격</div>
@@ -2319,6 +2348,41 @@ function showTrackingDetail(ticker, market) {
     </div>
   `;
   document.getElementById('detailModal').classList.add('active');
+}
+
+// 🆕 추천 시점 가격 직접 수정 (실제 매수가로 변경 등)
+function editAddedPrice(ticker, market) {
+  const t = STATE.tracking.find(x => x.ticker === ticker && x.market === market);
+  if (!t) return;
+  
+  const sym = t.currency === 'KRW' ? '₩' : '$';
+  const cur = t.addedPrice;
+  const promptMsg = `${t.name} 추천 시점 가격을 수정합니다.\n\n현재 값: ${sym}${fmtNum(cur, t.currency === 'KRW' ? 0 : 2)}\n새 가격을 입력하세요 (숫자만):`;
+  
+  const input = prompt(promptMsg, String(cur));
+  if (input === null) return;  // 취소
+  
+  const newPrice = parseFloat(String(input).replace(/[,\s₩$]/g, ''));
+  if (!newPrice || newPrice <= 0 || isNaN(newPrice)) {
+    showToast('❌ 유효한 가격이 아닙니다');
+    return;
+  }
+  
+  t.addedPrice = newPrice;
+  // 첫 가격 포인트도 갱신 (차트 baseline 일관성)
+  if (Array.isArray(t.prices) && t.prices.length > 0) {
+    // 첫 포인트가 추가일과 같으면 baseline이라 갱신
+    const first = t.prices[0];
+    if (first && first.ts === t.addedDate && first.price !== newPrice) {
+      first.price = newPrice;
+    }
+  } else {
+    t.prices = [{ ts: t.addedDate, price: newPrice }];
+  }
+  
+  saveState();
+  showToast(`✅ 추천 시점 가격 변경: ${sym}${fmtNum(newPrice, t.currency === 'KRW' ? 0 : 2)}`);
+  showTrackingDetail(ticker, market);
 }
 
 async function updateOnePrice(ticker, market) {
