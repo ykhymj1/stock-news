@@ -405,18 +405,45 @@ function showV22NotAvailable() {
 // V22 상세 모달
 // ============================================
 function openV22ItemDetail(ticker) {
-  if (!V22_CACHE.data) return;
+  let item = null;
   
-  let item = (V22_CACHE.data.recommendations || []).find(r => r.ticker === ticker);
-  if (!item) {
-    item = (V22_CACHE.data.blocked || []).find(b => b.ticker === ticker);
+  // 1) V22 추천/차단 풀에서 찾기
+  if (V22_CACHE.data) {
+    item = (V22_CACHE.data.recommendations || []).find(r => r.ticker === ticker);
+    if (!item) {
+      item = (V22_CACHE.data.blocked || []).find(b => b.ticker === ticker);
+    }
   }
+  
+  // 2) V22 추천에 없으면 → 종목 정보만 표시 (V10 뉴스에서 온 경우)
   if (!item) {
-    if (typeof showToast === 'function') showToast('종목 정보 없음');
-    return;
+    item = {
+      ticker: ticker,
+      name: ticker,
+      market: 'KOSPI',
+      _no_v22: true,
+    };
   }
   
   showV22DetailModal(item);
+}
+
+// 종목명/티커 정규화 (V10 뉴스 링크의 ?t=종목명 처리용)
+async function v22ResolveTicker(query) {
+  if (!query) return null;
+  
+  // 6자리 영숫자면 그대로 (티커)
+  if (/^[0-9A-Z]{6}$/i.test(query)) return query.toUpperCase();
+  
+  // V22 풀에서 종목명으로 찾기
+  if (V22_CACHE && V22_CACHE.data) {
+    const match = (V22_CACHE.data.recommendations || []).find(r => r.name === query);
+    if (match) return match.ticker;
+    const matchB = (V22_CACHE.data.blocked || []).find(b => b.name === query);
+    if (matchB) return matchB.ticker;
+  }
+  
+  return query;
 }
 
 function showV22DetailModal(item) {
@@ -546,20 +573,46 @@ function showV22DetailModal(item) {
     `;
   }
   
+  // 🆕 회사 정보 + 재무 + 뉴스 (비동기 로드용 placeholder)
   html += `
-    <div style="font-size:10px;color:#94a3b8;text-align:center;line-height:1.5;margin-top:14px;">
-      ⚠️ 백테스트 기반 추천 (5년 1082건 검증)<br/>
-      손절가 -5%, 보유 기간 ${item.hold_days}영업일 권장
+    <div id="v22ExtraInfo" style="margin-bottom:14px;">
+      <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;color:#94a3b8;font-size:12px;">
+        ⏳ 회사 정보·재무·뉴스 불러오는 중...
+      </div>
     </div>
   `;
+  
+  if (item._no_v22) {
+    html += `
+      <div style="font-size:10px;color:#94a3b8;text-align:center;line-height:1.5;margin-top:14px;">
+        ℹ️ 이 종목은 현재 V22 추천 풀에 포함되어 있지 않습니다<br/>
+        회사 정보·재무·뉴스만 표시됩니다
+      </div>
+    `;
+  } else {
+    html += `
+      <div style="font-size:10px;color:#94a3b8;text-align:center;line-height:1.5;margin-top:14px;">
+        ⚠️ 백테스트 기반 추천 (5년 1082건 검증)<br/>
+        손절가 -5%, 보유 기간 ${item.hold_days}영업일 권장
+      </div>
+    `;
+  }
   html += '</div>';
   
   // 모달 열기
-  document.getElementById('modalTitle').textContent = `🌟 V22 추천`;
-  document.getElementById('modalSubtitle').innerHTML = 
-    `${(V22_REGIME_INFO[item.regime] || {}).label || ''} · ${item.tier} · 백테스트 81.2%`;
+  const titleText = item._no_v22 ? '📊 종목 정보' : '🌟 V22 추천';
+  const tierLabelSub = V22_TIER_NAME[item.tier] || item.tier;
+  const subtitleText = item._no_v22 
+    ? `${item.ticker} · ${item.market || 'KOSPI'}`
+    : `${(V22_REGIME_INFO[item.regime] || {}).label || ''} · ${tierLabelSub} · 백테스트 81.2%`;
+  
+  document.getElementById('modalTitle').textContent = titleText;
+  document.getElementById('modalSubtitle').innerHTML = subtitleText;
   document.getElementById('modalBody').innerHTML = html;
   document.getElementById('detailModal').classList.add('active');
+  
+  // 🆕 비동기로 회사정보 + 재무 + 뉴스 로드
+  loadV22ExtraInfo(item).catch(e => console.warn('[V22 ExtraInfo]', e));
 }
 
 // ============================================
@@ -1161,3 +1214,273 @@ function renderV22EvalResult(data) {
   
   body.innerHTML = html;
 }
+
+
+// ============================================
+// 🆕 V22 모달 추가 정보 (회사정보 + 재무 + 뉴스)
+// ============================================
+async function loadV22ExtraInfo(item) {
+  const container = document.getElementById('v22ExtraInfo');
+  if (!container) return;
+  
+  const ticker = item.ticker;
+  if (!ticker) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  let html = '';
+  
+  // 1. DART 회사 정보 + 재무
+  try {
+    const dartData = (typeof fetchDartFinance === 'function') 
+      ? await fetchDartFinance(ticker) 
+      : null;
+    
+    if (dartData) {
+      const companyHtml = renderV22CompanyInfo(dartData);
+      const financialsHtml = renderV22Financials(dartData);
+      html += companyHtml + financialsHtml;
+    }
+  } catch (e) {
+    console.warn('[V22 DART]', e);
+  }
+  
+  // 2. 종목 뉴스
+  try {
+    const newsHtml = await fetchV22StockNews(ticker, item.name);
+    if (newsHtml) html += newsHtml;
+  } catch (e) {
+    console.warn('[V22 News]', e);
+  }
+  
+  if (html) {
+    container.innerHTML = html;
+  } else {
+    container.innerHTML = `
+      <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;color:#94a3b8;font-size:12px;">
+        ℹ️ 회사 정보·뉴스를 불러올 수 없습니다<br/>
+        <span style="font-size:10px;">DART API 키 설정 확인 (설정 → DART API 키)</span>
+      </div>
+    `;
+  }
+}
+
+
+function renderV22CompanyInfo(dartData) {
+  const company = dartData.company || {};
+  if (!company.corp_name && !company.induty_code && !company.ceo_nm) return '';
+  
+  let html = `
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:10px;">🏢 회사 정보</div>
+  `;
+  
+  const rows = [];
+  if (company.corp_name) rows.push(['회사명', escapeHtml(company.corp_name)]);
+  if (company.induty_code) rows.push(['업종', escapeHtml(company.induty_code)]);
+  if (company.ceo_nm) rows.push(['대표이사', escapeHtml(company.ceo_nm)]);
+  if (company.est_dt) {
+    const est = company.est_dt;
+    const formatted = est.length === 8 ? `${est.slice(0,4)}.${est.slice(4,6)}.${est.slice(6,8)}` : est;
+    rows.push(['설립일', formatted]);
+  }
+  if (company.adres) {
+    const addr = company.adres.length > 35 ? company.adres.substring(0, 35) + '…' : company.adres;
+    rows.push(['주소', escapeHtml(addr)]);
+  }
+  if (company.hm_url) {
+    rows.push(['홈페이지', `<a href="${escapeHtml(company.hm_url)}" target="_blank" style="color:#7c3aed;text-decoration:none;">방문하기 →</a>`]);
+  }
+  
+  for (const [label, value] of rows) {
+    html += `
+      <div style="display:flex;justify-content:space-between;align-items:start;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px;">
+        <span style="color:#64748b;flex-shrink:0;margin-right:8px;min-width:60px;">${label}</span>
+        <span style="color:#1e293b;text-align:right;word-break:break-word;">${value}</span>
+      </div>
+    `;
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+
+function renderV22Financials(dartData) {
+  const financial = dartData.financial || {};
+  const annual = financial.annual || {};
+  const quarter = financial.latest_quarter || {};
+  
+  if (!annual.revenue && !annual.operating_profit && !quarter.revenue) return '';
+  
+  let html = `
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:10px;">📊 재무 실적</div>
+  `;
+  
+  if (annual.revenue || annual.operating_profit || annual.net_profit) {
+    const year = annual.year || annual.bsns_year || '';
+    html += `<div style="font-size:11px;font-weight:600;color:#7c3aed;margin-bottom:6px;">📅 ${year}년 연간</div>`;
+    
+    if (annual.revenue) {
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">매출액</span><span style="font-family:'DM Mono',monospace;font-weight:600;">${formatV22Money(annual.revenue)}</span></div>`;
+    }
+    if (annual.operating_profit) {
+      const color = annual.operating_profit >= 0 ? '#16a34a' : '#dc2626';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">영업이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(annual.operating_profit)}</span></div>`;
+    }
+    if (annual.net_profit) {
+      const color = annual.net_profit >= 0 ? '#16a34a' : '#dc2626';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">순이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(annual.net_profit)}</span></div>`;
+    }
+  }
+  
+  if (quarter.revenue || quarter.operating_profit) {
+    const q = quarter.quarter || '';
+    const year = quarter.year || '';
+    html += `<div style="font-size:11px;font-weight:600;color:#7c3aed;margin-top:10px;margin-bottom:6px;border-top:1px solid #f1f5f9;padding-top:8px;">📅 ${year}년 ${q}분기</div>`;
+    
+    if (quarter.revenue) {
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">매출액</span><span style="font-family:'DM Mono',monospace;font-weight:600;">${formatV22Money(quarter.revenue)}</span></div>`;
+    }
+    if (quarter.operating_profit) {
+      const color = quarter.operating_profit >= 0 ? '#16a34a' : '#dc2626';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">영업이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(quarter.operating_profit)}</span></div>`;
+    }
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+
+function formatV22Money(amount) {
+  if (!amount || isNaN(amount)) return '-';
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  
+  if (abs >= 1e12) return `${sign}${(abs / 1e12).toFixed(1)}조원`;
+  if (abs >= 1e8) return `${sign}${(abs / 1e8).toFixed(0)}억원`;
+  if (abs >= 1e4) return `${sign}${(abs / 1e4).toFixed(0)}만원`;
+  return `${sign}${abs.toLocaleString()}원`;
+}
+
+
+// 종목 뉴스 (네이버 금융)
+async function fetchV22StockNews(ticker, stockName) {
+  const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl) 
+    ? STATE.settings.newsProxyUrl 
+    : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+  
+  if (!newsProxy || !ticker) return '';
+  if (!/^[0-9A-Z]{6}$/i.test(ticker)) return '';
+  
+  const newsUrl = `https://finance.naver.com/item/news_news.naver?code=${ticker}`;
+  
+  try {
+    const proxyUrl = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(newsUrl);
+    const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return '';
+    
+    const text = await r.text();
+    const news = parseNaverFinanceNews(text);
+    
+    if (news.length === 0) return '';
+    
+    let html = `
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:10px;">📰 관련 뉴스 (최신 ${news.length}건)</div>
+    `;
+    
+    for (const n of news.slice(0, 5)) {
+      html += `
+        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9;">
+          <a href="${escapeHtml(n.link)}" target="_blank" style="color:#1e293b;text-decoration:none;font-size:13px;line-height:1.5;display:block;font-weight:500;">
+            ${escapeHtml(n.title)}
+          </a>
+          <div style="font-size:10px;color:#94a3b8;margin-top:3px;">
+            ${escapeHtml(n.source || '')}${n.date ? ' · ' + escapeHtml(n.date) : ''}
+          </div>
+        </div>
+      `;
+    }
+    
+    html += '</div>';
+    return html;
+  } catch (e) {
+    console.warn('[V22 News]', e);
+    return '';
+  }
+}
+
+
+function parseNaverFinanceNews(html) {
+  const news = [];
+  const aRegex = /<a[^>]*href="(\/item\/news_read\.naver[^"]*)"[^>]*>([^<]+)<\/a>/gi;
+  const seenTitles = new Set();
+  
+  let m;
+  while ((m = aRegex.exec(html)) !== null && news.length < 5) {
+    let link = m[1];
+    if (link.startsWith('/')) link = 'https://finance.naver.com' + link;
+    
+    const title = m[2].trim();
+    if (title.length < 10) continue;
+    if (seenTitles.has(title)) continue;
+    seenTitles.add(title);
+    
+    news.push({
+      title: title.length > 80 ? title.substring(0, 80) + '…' : title,
+      link: link,
+      source: '',
+      date: '',
+    });
+  }
+  
+  return news;
+}
+
+
+// ============================================
+// 🆕 URL 파라미터 자동 모달 (?t=종목명 또는 ?t=티커)
+// ============================================
+(function setupV22UrlRouter() {
+  if (typeof window === 'undefined') return;
+  
+  function checkUrlAndOpen() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get('t') || params.get('ticker');
+      
+      if (!t) return;
+      
+      let attempts = 0;
+      const tryOpen = async () => {
+        attempts++;
+        if (attempts > 30) {
+          const ticker = await v22ResolveTicker(t);
+          if (ticker) openV22ItemDetail(ticker);
+          return;
+        }
+        
+        if (typeof V22_CACHE !== 'undefined' && V22_CACHE && V22_CACHE.data) {
+          const ticker = await v22ResolveTicker(t);
+          if (ticker) openV22ItemDetail(ticker);
+        } else {
+          setTimeout(tryOpen, 100);
+        }
+      };
+      
+      setTimeout(tryOpen, 500);
+    } catch (e) {
+      console.warn('[V22 URL Router]', e);
+    }
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', checkUrlAndOpen);
+  } else {
+    checkUrlAndOpen();
+  }
+})();
