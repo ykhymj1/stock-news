@@ -407,7 +407,7 @@ function showV22NotAvailable() {
 function openV22ItemDetail(ticker) {
   let item = null;
   
-  // 1) V22 추천/차단 풀에서 찾기
+  // 1) V22 추천/차단 풀에서 찾기 (티커로)
   if (V22_CACHE.data) {
     item = (V22_CACHE.data.recommendations || []).find(r => r.ticker === ticker);
     if (!item) {
@@ -415,11 +415,40 @@ function openV22ItemDetail(ticker) {
     }
   }
   
-  // 2) V22 추천에 없으면 → 종목 정보만 표시 (V10 뉴스에서 온 경우)
+  // 2) V22 추천에 없으면 → 종목 정보만 표시
   if (!item) {
+    let resolvedTicker = ticker;
+    let stockName = ticker;
+    
+    // 6자리 티커가 아니면 → KR_STOCKS에서 종목명 → 티커 변환 시도
+    if (!/^[0-9A-Z]{6}$/i.test(ticker)) {
+      if (typeof window !== 'undefined' && window.KR_STOCKS) {
+        // 정확 일치
+        if (window.KR_STOCKS[ticker]) {
+          resolvedTicker = window.KR_STOCKS[ticker];
+          stockName = ticker;
+        } else {
+          // 부분 일치 (긴 이름 우선)
+          const names = Object.keys(window.KR_STOCKS).sort((a, b) => b.length - a.length);
+          for (const name of names) {
+            if (ticker === name || ticker.includes(name) || name.includes(ticker)) {
+              resolvedTicker = window.KR_STOCKS[name];
+              stockName = name;
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      // 티커인 경우 → KR_CODE_TO_NAME에서 이름 가져오기
+      if (typeof window !== 'undefined' && window.KR_CODE_TO_NAME) {
+        stockName = window.KR_CODE_TO_NAME[ticker] || ticker;
+      }
+    }
+    
     item = {
-      ticker: ticker,
-      name: ticker,
+      ticker: resolvedTicker,
+      name: stockName,
       market: 'KOSPI',
       _no_v22: true,
     };
@@ -432,10 +461,10 @@ function openV22ItemDetail(ticker) {
 async function v22ResolveTicker(query) {
   if (!query) return null;
   
-  // 6자리 영숫자면 그대로 (티커)
+  // 1) 6자리 영숫자면 그대로 (티커)
   if (/^[0-9A-Z]{6}$/i.test(query)) return query.toUpperCase();
   
-  // V22 풀에서 종목명으로 찾기
+  // 2) V22 풀에서 종목명으로 찾기
   if (V22_CACHE && V22_CACHE.data) {
     const match = (V22_CACHE.data.recommendations || []).find(r => r.name === query);
     if (match) return match.ticker;
@@ -443,6 +472,21 @@ async function v22ResolveTicker(query) {
     if (matchB) return matchB.ticker;
   }
   
+  // 3) 🆕 KR_STOCKS 전체 종목 마스터에서 찾기 (kr_stocks.js)
+  if (typeof window !== 'undefined' && window.KR_STOCKS) {
+    // 정확 일치
+    if (window.KR_STOCKS[query]) return window.KR_STOCKS[query];
+    
+    // 부분 일치 (긴 이름 우선)
+    const names = Object.keys(window.KR_STOCKS).sort((a, b) => b.length - a.length);
+    for (const name of names) {
+      if (query === name || query.includes(name) || name.includes(query)) {
+        return window.KR_STOCKS[name];
+      }
+    }
+  }
+  
+  // 4) 못 찾으면 query 그대로 (모달이 알아서 처리)
   return query;
 }
 
