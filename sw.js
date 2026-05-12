@@ -1,7 +1,7 @@
-// StockRadar Service Worker v34 (시세 폴백 + 추천가 수정)
-const CACHE = 'stockradar-v34';
+// StockRadar Service Worker v35 (kr_stocks_extra + Worker search 폴백)
+const CACHE = 'stockradar-v35';
 const FILES = [
-  './index.html', './app.js', './v22.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
+  './index.html', './app.js', './v22.js', './kr_stocks.js', './kr_stocks_extra.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
   './icon-192.png', './icon-512.png', './icon-180.png',
   './icon-32.png', './icon-16.png',

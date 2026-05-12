@@ -2192,6 +2192,10 @@ function openV22AddTrackModal() {
 }
 
 // 입력 시 자동완성
+// 자동완성 입력 디바운스용 타이머
+let _v22AddTrackInputTimer = null;
+let _v22AddTrackLastQuery = '';
+
 function v22OnAddTrackInput(event) {
   const q = (event.target.value || '').trim();
   const box = document.getElementById('v22AddTrackSuggest');
@@ -2202,25 +2206,104 @@ function v22OnAddTrackInput(event) {
     return;
   }
   
-  // v22SuggestStocks 재활용 (기존 자동완성 함수)
-  if (typeof v22SuggestStocks !== 'function') {
+  // 1) 로컬 KR_STOCKS 자동완성 (즉시)
+  let suggestions = [];
+  if (typeof v22SuggestStocks === 'function') {
+    suggestions = v22SuggestStocks(q).slice(0, 6);
+  }
+  
+  // 즉시 렌더 (로컬 결과)
+  v22RenderAddTrackSuggestions(suggestions);
+  
+  // 2) 결과가 부족하면 Worker /stock-search로 보강 (디바운스)
+  if (suggestions.length < 3 && q.length >= 1) {
+    if (_v22AddTrackInputTimer) clearTimeout(_v22AddTrackInputTimer);
+    _v22AddTrackLastQuery = q;
+    _v22AddTrackInputTimer = setTimeout(async () => {
+      // 입력이 그동안 바뀌었으면 무시
+      if (_v22AddTrackLastQuery !== q) return;
+      
+      try {
+        const remoteResults = await v22FetchStockSearchRemote(q);
+        // 입력이 그동안 바뀌었으면 무시
+        if (_v22AddTrackLastQuery !== q) return;
+        
+        // 로컬 + 원격 머지 (티커 중복 제거)
+        const merged = [...suggestions];
+        const seen = new Set(merged.map(s => s.ticker));
+        for (const r of remoteResults) {
+          if (seen.has(r.ticker)) continue;
+          seen.add(r.ticker);
+          merged.push(r);
+          if (merged.length >= 8) break;
+        }
+        v22RenderAddTrackSuggestions(merged);
+      } catch (e) {
+        console.warn('[v22 stock-search]', e);
+      }
+    }, 300);
+  }
+}
+
+// 자동완성 결과 렌더 (s.ticker 사용 - s.code 아님!)
+function v22RenderAddTrackSuggestions(suggestions) {
+  const box = document.getElementById('v22AddTrackSuggest');
+  if (!box) return;
+  
+  if (!Array.isArray(suggestions) || suggestions.length === 0) {
     box.innerHTML = '';
     return;
   }
   
-  const suggestions = v22SuggestStocks(q).slice(0, 6);
-  if (suggestions.length === 0) {
-    box.innerHTML = '';
-    return;
-  }
+  box.innerHTML = suggestions.map(s => {
+    const ticker = s.ticker || s.code || '';
+    const name = s.name || ticker;
+    const safeName = String(name).replace(/['\\]/g, '\\$&');
+    return `
+      <div onclick="v22PickAddTrack('${ticker}','${safeName}')"
+           style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px;cursor:pointer;background:#fff;">
+        <div style="font-size:13px;font-weight:600;color:#111827;">${escapeHtmlV22(name)}</div>
+        <div style="font-size:10px;color:#94a3b8;font-family:monospace;margin-top:2px;">${escapeHtmlV22(ticker)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Worker /stock-search 호출 (KV `corpcode:_names` - 전체 상장사)
+async function v22FetchStockSearchRemote(query) {
+  const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl)
+    ? STATE.settings.newsProxyUrl
+    : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+  if (!newsProxy || !query) return [];
   
-  box.innerHTML = suggestions.map(s => `
-    <div onclick="v22PickAddTrack('${s.code}','${(s.name || '').replace(/['\\]/g, '\\$&')}')"
-         style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px;cursor:pointer;background:#fff;">
-      <div style="font-size:13px;font-weight:600;color:#111827;">${escapeHtmlV22(s.name)}</div>
-      <div style="font-size:10px;color:#94a3b8;font-family:monospace;margin-top:2px;">${s.code}</div>
-    </div>
-  `).join('');
+  const url = newsProxy.replace(/\/$/, '') + '/stock-search?q=' + encodeURIComponent(query);
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return [];
+    const data = await r.json();
+    
+    // 응답 형식이 단일 결과({ok, ticker, name})일 수도, 목록({ok, results: [...]})일 수도
+    const items = [];
+    if (data) {
+      // 단일 결과 형식
+      if (typeof data.ticker === 'string' && /^[0-9A-Z]{6}$/i.test(data.ticker)) {
+        items.push({ ticker: data.ticker, name: data.name || data.ticker });
+      }
+      // results 배열 형식
+      if (Array.isArray(data.results)) {
+        for (const r of data.results) {
+          if (!r) continue;
+          const t = r.ticker || r.code;
+          if (typeof t === 'string' && /^[0-9A-Z]{6}$/i.test(t)) {
+            items.push({ ticker: t, name: r.name || t });
+          }
+        }
+      }
+    }
+    return items.slice(0, 6);
+  } catch (e) {
+    return [];
+  }
 }
 
 // 자동완성 클릭 -> 입력창 채우기
@@ -2259,7 +2342,7 @@ async function v22SubmitAddTrack() {
       ticker = rawQuery.toUpperCase();
       name = (window.KR_CODE_TO_NAME && window.KR_CODE_TO_NAME[ticker]) || ticker;
     } else {
-      // 한국 종목명 1회 검색
+      // 1차: KR_STOCKS 로컬 검색
       if (typeof v22ResolveTicker === 'function') {
         const resolved = v22ResolveTicker(rawQuery);
         if (resolved && resolved.ticker) {
@@ -2267,11 +2350,24 @@ async function v22SubmitAddTrack() {
           name = resolved.name || rawQuery;
         }
       }
+      
+      // 2차: Worker /stock-search 폴백 (KV 전체 상장사)
+      if (!ticker) {
+        try {
+          const remoteResults = await v22FetchStockSearchRemote(rawQuery);
+          if (remoteResults.length > 0) {
+            ticker = remoteResults[0].ticker;
+            name = remoteResults[0].name || rawQuery;
+          }
+        } catch (e) {
+          console.warn('[V22 AddTrack] stock-search fail', e);
+        }
+      }
     }
   }
   
   if (!ticker || !/^[0-9A-Z]{6}$/i.test(ticker)) {
-    if (typeof showToast === 'function') showToast('❌ 종목을 찾을 수 없습니다');
+    if (typeof showToast === 'function') showToast(`❌ 종목을 찾을 수 없습니다: ${rawQuery}`);
     return;
   }
   if (!name) name = ticker;
