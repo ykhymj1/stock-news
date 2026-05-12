@@ -404,11 +404,11 @@ function showV22NotAvailable() {
 // ============================================
 // V22 상세 모달
 // ============================================
-function openV22ItemDetail(ticker) {
+async function openV22ItemDetail(ticker) {
   let item = null;
   
   // 1) V22 추천/차단 풀에서 찾기 (티커로)
-  if (V22_CACHE.data) {
+  if (V22_CACHE && V22_CACHE.data) {
     item = (V22_CACHE.data.recommendations || []).find(r => r.ticker === ticker);
     if (!item) {
       item = (V22_CACHE.data.blocked || []).find(b => b.ticker === ticker);
@@ -420,29 +420,63 @@ function openV22ItemDetail(ticker) {
     let resolvedTicker = ticker;
     let stockName = ticker;
     
-    // 6자리 티커가 아니면 → KR_STOCKS에서 종목명 → 티커 변환 시도
-    if (!/^[0-9A-Z]{6}$/i.test(ticker)) {
+    // 6자리 티커면 그대로 사용
+    if (/^[0-9A-Z]{6}$/i.test(ticker)) {
+      resolvedTicker = ticker.toUpperCase();
+      // 이름은 일단 티커로
+      if (typeof window !== 'undefined' && window.KR_CODE_TO_NAME) {
+        stockName = window.KR_CODE_TO_NAME[ticker] || ticker;
+      }
+    } else {
+      // 종목명이면 → KR_STOCKS 먼저 시도
+      let found = false;
       if (typeof window !== 'undefined' && window.KR_STOCKS) {
-        // 정확 일치
         if (window.KR_STOCKS[ticker]) {
           resolvedTicker = window.KR_STOCKS[ticker];
           stockName = ticker;
+          found = true;
         } else {
-          // 부분 일치 (긴 이름 우선)
+          // 부분 일치
           const names = Object.keys(window.KR_STOCKS).sort((a, b) => b.length - a.length);
           for (const name of names) {
             if (ticker === name || ticker.includes(name) || name.includes(ticker)) {
               resolvedTicker = window.KR_STOCKS[name];
               stockName = name;
+              found = true;
               break;
             }
           }
         }
       }
-    } else {
-      // 티커인 경우 → KR_CODE_TO_NAME에서 이름 가져오기
-      if (typeof window !== 'undefined' && window.KR_CODE_TO_NAME) {
-        stockName = window.KR_CODE_TO_NAME[ticker] || ticker;
+      
+      // KR_STOCKS에서 못 찾으면 → 🆕 Worker /stock-search 활용
+      if (!found) {
+        try {
+          const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl) 
+            ? STATE.settings.newsProxyUrl 
+            : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+          
+          const url = newsProxy.replace(/\/$/, '') + '/stock-search?q=' + encodeURIComponent(ticker);
+          const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+          if (r.ok) {
+            const data = await r.json();
+            if (data.ok && data.ticker) {
+              resolvedTicker = data.ticker;
+              stockName = data.name || ticker;
+              found = true;
+            }
+          }
+        } catch (e) {
+          console.warn('[V22 stock-search]', e);
+        }
+      }
+      
+      if (!found) {
+        // Worker도 실패하면 종목명 그대로 (DART API 실패할 것)
+        if (typeof showToast === 'function') {
+          showToast('종목을 찾을 수 없습니다: ' + ticker);
+        }
+        return;
       }
     }
     

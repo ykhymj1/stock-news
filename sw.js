@@ -1,5 +1,5 @@
-// StockRadar Service Worker v28 (V22++++++ - 5년 백테스트 81.2% 적용)
-const CACHE = 'stockradar-v28';
+// StockRadar Service Worker v27 (V22++++++ - 5년 백테스트 81.2% 적용)
+const CACHE = 'stockradar-v27';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',
@@ -26,6 +26,20 @@ self.addEventListener('fetch', e => {
       e.request.url.includes('workers.dev')) {
     return;
   }
+  
+  // v22.js는 항상 네트워크 우선 (자주 업데이트되는 파일)
+  if (e.request.url.includes('v22.js') || e.request.url.includes('sw.js')) {
+    e.respondWith(
+      fetch(e.request).then(networkResponse => {
+        // 성공하면 캐시 업데이트
+        const cloned = networkResponse.clone();
+        caches.open(CACHE).then(c => c.put(e.request, cloned)).catch(() => {});
+        return networkResponse;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  
   e.respondWith(
     caches.match(e.request).then(r => r || fetch(e.request).catch(() => caches.match('./index.html')))
   );
