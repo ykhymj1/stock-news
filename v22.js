@@ -447,6 +447,12 @@ async function v22ResolveTicker(query) {
 }
 
 function showV22DetailModal(item) {
+  // _no_v22인 경우 - V22 추천 풀에 없는 종목 (V10 뉴스에서 옴)
+  if (item._no_v22) {
+    showV22DetailModalSimple(item);
+    return;
+  }
+  
   const stars = getV22Stars(item.expected_wr);
   const tierLabel = V22_TIER_NAME[item.tier] || item.tier;
   
@@ -1213,6 +1219,52 @@ function renderV22EvalResult(data) {
   `;
   
   body.innerHTML = html;
+}
+
+
+// ============================================
+// 🆕 V22 추천 풀에 없는 종목용 간단 모달
+// (V10 뉴스 텔레그램 링크에서 온 경우)
+// ============================================
+function showV22DetailModalSimple(item) {
+  let html = `<div style="padding:14px 18px 32px;">`;
+  
+  // 헤더
+  html += `
+    <div style="background:linear-gradient(135deg,#5b21b6,#7c3aed,#a855f7);border-radius:14px;padding:16px;color:#fff;margin-bottom:14px;">
+      <div style="font-size:11px;opacity:0.85;letter-spacing:1px;">${item.market || 'KOSPI'} · ${item.ticker}</div>
+      <div style="font-size:24px;font-weight:700;margin-top:4px;">${escapeHtml(item.name || item.ticker)}</div>
+      <div style="font-size:12px;opacity:0.85;margin-top:8px;">
+        ℹ️ 이 종목은 현재 V22 추천 풀에 포함되어 있지 않습니다
+      </div>
+    </div>
+  `;
+  
+  // 회사 정보 + 재무 + 뉴스 (비동기 로드 placeholder)
+  html += `
+    <div id="v22ExtraInfo" style="margin-bottom:14px;">
+      <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;color:#94a3b8;font-size:12px;">
+        ⏳ 회사 정보·재무·뉴스 불러오는 중...
+      </div>
+    </div>
+  `;
+  
+  html += `
+    <div style="font-size:10px;color:#94a3b8;text-align:center;line-height:1.5;margin-top:14px;">
+      💡 V22 추천 종목이 아닙니다<br/>
+      회사 정보·재무·뉴스만 표시됩니다
+    </div>
+  `;
+  html += '</div>';
+  
+  // 모달 열기
+  document.getElementById('modalTitle').textContent = '📊 종목 정보';
+  document.getElementById('modalSubtitle').innerHTML = `${item.ticker} · ${item.market || 'KOSPI'}`;
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('detailModal').classList.add('active');
+  
+  // 비동기로 회사 정보 + 재무 + 뉴스 로드
+  loadV22ExtraInfo(item).catch(e => console.warn('[V22 ExtraInfo]', e));
 }
 
 
