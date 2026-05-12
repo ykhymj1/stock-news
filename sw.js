@@ -1,5 +1,5 @@
-// StockRadar Service Worker v35 (kr_stocks_extra + Worker search 폴백)
-const CACHE = 'stockradar-v35';
+// StockRadar Service Worker v36 (추적 메모 기능)
+const CACHE = 'stockradar-v36';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './kr_stocks_extra.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',

@@ -26,7 +26,7 @@ const DEFAULTS = {
     usWatchlist: [],         // 미국 관심종목
   },
   recommendations: {},  // { 'YYYY-MM-DD': { kr: [{...}], us: [{...}] } }
-  tracking: [],         // [{ ticker, name, market, addedDate, addedPrice, currentPrice, prices: [...], reason }]
+  tracking: [],         // [{ ticker, name, market, addedDate, addedPrice, currentPrice, prices: [...], reason, memo, memoUpdatedAt }]
   alertsSeen: [],       // 이미 알림 표시한 추천 ID
   fingerprints: {},     // { 'fingerprint_hash': { firstSeen: ISO, count: N, ticker, keyword } } - 재탕 감지용
 };
@@ -2229,6 +2229,16 @@ function renderTracking() {
       }).join('')}</div>`;
     }
 
+    // 메모 미리보기 (있을 때만, 80자까지)
+    let memoPreview = '';
+    if (t.memo && t.memo.trim()) {
+      const memo = t.memo.trim();
+      const short = memo.length > 80 ? memo.substring(0, 80) + '…' : memo;
+      memoPreview = `
+        <div class="tracking-memo-preview" style="background:#fffbeb;border-left:3px solid #fbbf24;padding:6px 10px;margin-top:8px;border-radius:4px;font-size:11px;color:#78350f;line-height:1.5;white-space:pre-wrap;word-break:break-word;">📝 ${escapeHtml(short)}</div>
+      `;
+    }
+
     return `
       <div class="tracking-card">
         <div class="tracking-header">
@@ -2242,6 +2252,7 @@ function renderTracking() {
           </div>
         </div>
         ${sparkHtml}
+        ${memoPreview}
         <div class="tracking-actions">
           <button class="btn-detail" onclick="showTrackingDetail('${t.ticker}','${t.market}')">상세 차트</button>
           <button class="btn-delete" onclick="deleteTracking('${t.ticker}','${t.market}')">삭제</button>
@@ -2307,6 +2318,14 @@ function showTrackingDetail(ticker, market) {
     svgChart = '<div class="empty" style="padding:20px;"><div class="desc">데이터 포인트가 부족합니다.<br/>"전체 시세 갱신"을 여러 번 눌러 데이터를 쌓아주세요.</div></div>';
   }
 
+  // 메모 섹션용 데이터 (없으면 빈 문자열)
+  const memoText = (t.memo || '').toString();
+  const memoUpdatedLabel = t.memoUpdatedAt 
+    ? `· 마지막 수정 ${fmtDate(t.memoUpdatedAt)} ${timeAgo(t.memoUpdatedAt)}`
+    : '';
+  // textarea에 안전하게 들어가도록 escapeHtml
+  const memoSafe = escapeHtml(memoText);
+  
   document.getElementById('modalTitle').innerHTML = `${escapeHtml(t.name)} <span style="font-size:12px;color:#6b7280;font-family:'DM Mono',monospace;font-weight:500;">${t.ticker}</span>`;
   document.getElementById('modalSubtitle').innerHTML = `${t.market === 'kr' ? '🇰🇷 한국' : '🇺🇸 미국'} · 추천일 ${fmtDate(t.addedDate)}`;
   document.getElementById('modalBody').innerHTML = `
@@ -2342,12 +2361,68 @@ function showTrackingDetail(ticker, market) {
       ${svgChart}
     </div>
 
+    <div class="detail-section">
+      <div class="detail-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>📝 메모</span>
+        <span id="memoStatus" style="font-size:10px;color:#94a3b8;font-weight:400;">${memoUpdatedLabel}</span>
+      </div>
+      <textarea id="trackingMemo"
+                placeholder="예: 12/24 28,000원에 매수. +5% 목표가 30,450원 도달 시 50% 매도. 손절가 27,000원."
+                oninput="onMemoInput()"
+                onblur="saveTrackingMemo('${ticker}','${market}')"
+                style="width:100%;min-height:90px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;line-height:1.6;color:#1e293b;background:#fffbeb;box-sizing:border-box;resize:vertical;font-family:inherit;">${memoSafe}</textarea>
+      <div style="font-size:10px;color:#94a3b8;margin-top:6px;text-align:right;">
+        포커스 벗어나면 자동 저장됩니다
+      </div>
+    </div>
+
     <div class="action-row" style="padding:0;margin-top:8px;">
       <button class="action-btn secondary" onclick="updateOnePrice('${ticker}','${market}')">↻ 시세 갱신</button>
       <button class="action-btn secondary" onclick="closeModal('detailModal')">닫기</button>
     </div>
   `;
   document.getElementById('detailModal').classList.add('active');
+}
+
+// 🆕 메모 자동 저장
+function saveTrackingMemo(ticker, market) {
+  const t = STATE.tracking.find(x => x.ticker === ticker && x.market === market);
+  if (!t) return;
+  
+  const textarea = document.getElementById('trackingMemo');
+  if (!textarea) return;
+  
+  const newMemo = (textarea.value || '').trim();
+  const oldMemo = (t.memo || '').trim();
+  
+  // 변경 없으면 저장 skip
+  if (newMemo === oldMemo) return;
+  
+  t.memo = newMemo;
+  t.memoUpdatedAt = new Date().toISOString();
+  saveState();
+  
+  // 상태 표시 갱신 (모달이 아직 열려있으면)
+  const status = document.getElementById('memoStatus');
+  if (status) {
+    status.textContent = `· 방금 저장됨`;
+    status.style.color = '#15803d';
+    setTimeout(() => {
+      if (status) {
+        status.textContent = `· 마지막 수정 ${fmtDate(t.memoUpdatedAt)} 방금`;
+        status.style.color = '#94a3b8';
+      }
+    }, 2000);
+  }
+}
+
+// 🆕 메모 입력 중 - 저장 상태 표시 변경 (시각적 피드백)
+function onMemoInput() {
+  const status = document.getElementById('memoStatus');
+  if (status) {
+    status.textContent = '· 편집 중...';
+    status.style.color = '#c2410c';
+  }
 }
 
 // 🆕 추천 시점 가격 직접 수정 (실제 매수가로 변경 등)
