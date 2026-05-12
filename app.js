@@ -2821,9 +2821,39 @@ document.addEventListener('DOMContentLoaded', () => {
   switchView(STATE.view || 'today');
   // 자동 갱신
   setupAutoRefresh();
-  // PWA Service Worker 등록
+  // PWA Service Worker 등록 + 자동 업데이트
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      // 1) 페이지 진입할 때마다 새 SW 있는지 즉시 체크
+      try { reg.update(); } catch (e) {}
+      
+      // 2) 6시간마다 자동 체크 (장시간 PWA 사용 시)
+      setInterval(() => { try { reg.update(); } catch (e) {} }, 6 * 60 * 60 * 1000);
+      
+      // 3) 새 SW가 발견되면 (installing 상태)
+      reg.addEventListener('updatefound', () => {
+        const newSW = reg.installing;
+        if (!newSW) return;
+        
+        newSW.addEventListener('statechange', () => {
+          // 새 SW가 설치 완료되고, 기존 SW가 있으면 → 새 버전 대기 중
+          if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('[SW] 새 버전 발견 - 즉시 적용');
+            // 새 SW에게 즉시 활성화하라고 메시지 전달
+            newSW.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    }).catch(() => {});
+    
+    // 4) SW가 controller 바뀌면 (= 새 SW 활성화 완료) → 페이지 1회 자동 새로고침
+    let _refreshed = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_refreshed) return;
+      _refreshed = true;
+      console.log('[SW] 새 버전 활성화 - 페이지 새로고침');
+      window.location.reload();
+    });
   }
 
   // 텔레그램 알림에서 들어온 경우 해당 종목 자동 열기
