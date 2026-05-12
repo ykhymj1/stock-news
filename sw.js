@@ -1,5 +1,5 @@
-// StockRadar Service Worker v27 (V22++++++ - 5년 백테스트 81.2% 적용)
-const CACHE = 'stockradar-v27';
+// StockRadar Service Worker v31 (V22++++++ - 뉴스 표시 강화)
+const CACHE = 'stockradar-v31';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',

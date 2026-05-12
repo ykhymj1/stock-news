@@ -407,12 +407,13 @@ function showV22NotAvailable() {
 async function openV22ItemDetail(tickerInput) {
   // ⚠️ 입력값 안전성 - 객체로 들어오면 ticker 속성 추출
   let safeInput = tickerInput;
-  if (typeof safeInput === 'object' && safeInput !== null) {
-    safeInput = safeInput.ticker || safeInput.name || '';
+  const wasObject = (typeof tickerInput === 'object' && tickerInput !== null);
+  if (wasObject) {
+    safeInput = tickerInput.ticker || tickerInput.name || '';
+    // 객체로 들어오는 건 호출처 버그이므로 경고만 (안전 가드는 작동)
+    console.warn('[openV22ItemDetail] 객체 입력 감지 - 호출처 점검 권장:', tickerInput, '→ ticker:', safeInput);
   }
   const ticker = String(safeInput || '').trim();
-  
-  console.log('[openV22ItemDetail] input:', tickerInput, '→ ticker:', ticker);
   
   if (!ticker) {
     console.warn('[openV22ItemDetail] 빈 입력');
@@ -424,6 +425,8 @@ async function openV22ItemDetail(tickerInput) {
     console.error('[openV22ItemDetail] 잘못된 형식:', ticker);
     return;
   }
+  
+  console.log('[openV22ItemDetail]', ticker);
   
   let item = null;
   
@@ -512,8 +515,21 @@ async function openV22ItemDetail(tickerInput) {
       }
       
       if (!found) {
+        // 알려진 비상장/암호화폐/지수 키워드 안내
+        const CRYPTO_OR_NON_STOCK = ['리플', '비트코인', '이더리움', '도지', '솔라나', '에이다',
+                                     'ripple', 'bitcoin', 'ethereum', 'btc', 'eth', 'xrp', 'doge', 'sol',
+                                     '코스피', '코스닥', 'kospi', 'kosdaq', 's&p', 'nasdaq', '나스닥', '다우'];
+        const isNonStock = CRYPTO_OR_NON_STOCK.some(k => 
+          ticker.toLowerCase().includes(k.toLowerCase())
+        );
+        
+        const msg = isNonStock
+          ? `"${ticker}"는 상장 주식이 아닙니다 (암호화폐/지수 등은 표시 불가)`
+          : `종목을 찾을 수 없습니다: "${ticker}" (비상장 또는 종목명 확인 필요)`;
+        
+        console.warn('[openV22ItemDetail] 종목 미발견:', ticker, '| isNonStock:', isNonStock);
         if (typeof showToast === 'function') {
-          showToast('종목을 찾을 수 없습니다: ' + ticker);
+          showToast(msg);
         }
         return;
       }
@@ -530,18 +546,8 @@ async function openV22ItemDetail(tickerInput) {
   showV22DetailModal(item);
 }
 
-// 종목명/티커 정규화 (V10 뉴스 링크의 ?t=종목명 처리용)
-async function v22ResolveTicker(queryInput) {
-  // 안전성 보장
-  const query = String(queryInput || '').trim();
-  if (!query) return null;
-  
-  // 1) 6자리 영숫자면 그대로
-  if (/^[0-9A-Z]{6}$/i.test(query)) return query.toUpperCase();
-  
-  // openV22ItemDetail 자체가 이제 종목명도 처리하니까 그대로 반환
-  return query;
-}
+// (구) v22ResolveTicker 정의는 라인 ~825의 단일 정의({ticker, name} 객체 반환)로 통합되었습니다.
+// 이 자리에 같은 이름의 두 번째 정의가 있어 객체가 그대로 openV22ItemDetail에 전달되던 문제 해결.
 
 function showV22DetailModal(item) {
   // _no_v22인 경우 - V22 추천 풀에 없는 종목 (V10 뉴스에서 옴)
@@ -651,8 +657,9 @@ function showV22DetailModal(item) {
     `;
   }
   
-  // DART 공시 정보
+  // DART 공시 정보 + 외부 링크
   if (item.dart_filings_count > 0) {
+    const dartUrl = `https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(item.name || '')}`;
     html += `
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
         <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:8px;">📋 DART 공시 (최근 7일, ${item.dart_filings_count}건)</div>
@@ -662,6 +669,33 @@ function showV22DetailModal(item) {
     }
     if (item.dart_strongest_positive) {
       html += `<div style="background:#f0fdf4;border-radius:8px;padding:8px;margin-bottom:6px;font-size:12px;color:#15803d;">✅ ${escapeHtml(item.dart_strongest_positive.label || '호재')}</div>`;
+    }
+    // DART 외부 링크 (클릭 가능)
+    html += `
+      <a href="${dartUrl}" target="_blank" rel="noopener" 
+         style="display:block;margin-top:8px;padding:8px 12px;background:#f1f5f9;border:1px solid #e5e7eb;border-radius:8px;color:#1e293b;text-decoration:none;font-size:12px;font-weight:600;text-align:center;">
+        🔗 DART에서 전체 공시 보기 →
+      </a>
+    `;
+    html += `</div>`;
+  }
+  
+  // 🆕 V22 추천 객체에 박혀있는 뉴스 (recommend_v22_pppppp.py 산출물의 news_items)
+  if (Array.isArray(item.news_items) && item.news_items.length > 0) {
+    html += `
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:8px;">📰 매칭 뉴스 (${item.news_items.length}건)</div>
+    `;
+    for (const n of item.news_items.slice(0, 5)) {
+      const title = String((n && (n.title || n.headline)) || '').trim();
+      if (!title) continue;
+      const badge = renderV22NewsImpactBadge(n);
+      html += `
+        <div style="padding:6px 0;border-bottom:1px solid #f1f5f9;">
+          <div style="font-size:12px;color:#1e293b;line-height:1.5;">${escapeHtml(title)}</div>
+          ${badge ? '<div style="margin-top:3px;">' + badge + '</div>' : ''}
+        </div>
+      `;
     }
     html += `</div>`;
   }
@@ -1625,55 +1659,212 @@ function formatV22Money(amount) {
 // 종목 뉴스 (네이버 금융)
 async function fetchV22StockNews(tickerInput, stockName) {
   const ticker = String(tickerInput || '').trim();
-  console.log('[fetchV22StockNews] ticker:', ticker);
+  const name = String(stockName || '').trim();
+  console.log('[fetchV22StockNews] ticker:', ticker, 'name:', name);
   
-  const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl) 
-    ? STATE.settings.newsProxyUrl 
-    : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
-  
-  if (!newsProxy || !ticker) return '';
-  if (!/^[0-9A-Z]{6}$/i.test(ticker)) {
+  if (!ticker || !/^[0-9A-Z]{6}$/i.test(ticker)) {
     console.warn('[fetchV22StockNews] 잘못된 ticker 형식:', ticker);
     return '';
   }
   
-  const newsUrl = `https://finance.naver.com/item/news_news.naver?code=${ticker}`;
+  // 1) 우선 V10 캐시에서 매칭 (회사 PC가 매일 수집한 뉴스)
+  let v10News = [];
+  try {
+    v10News = await fetchV10NewsForTicker(ticker, name);
+  } catch (e) {
+    console.warn('[fetchV22StockNews] V10 fetch fail', e);
+  }
+  
+  // 2) 추가로 네이버 금융 뉴스도 시도 (보완)
+  let naverNews = [];
+  try {
+    naverNews = await fetchNaverFinanceNews(ticker);
+  } catch (e) {
+    console.warn('[fetchV22StockNews] Naver fetch fail', e);
+  }
+  
+  // 합치고 제목 중복 제거
+  const merged = [];
+  const seenTitles = new Set();
+  for (const n of [...v10News, ...naverNews]) {
+    if (!n || !n.title) continue;
+    const key = n.title.trim();
+    if (seenTitles.has(key)) continue;
+    seenTitles.add(key);
+    merged.push(n);
+    if (merged.length >= 8) break;
+  }
+  
+  if (merged.length === 0) {
+    // 뉴스가 하나도 없으면 → 네이버 금융 외부 링크 버튼 정도는 제공
+    const naverUrl = `https://finance.naver.com/item/news_news.naver?code=${ticker}`;
+    return `
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:8px;">📰 관련 뉴스</div>
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">최근 매칭된 뉴스가 없습니다</div>
+        <a href="${naverUrl}" target="_blank" rel="noopener" 
+           style="display:inline-block;padding:8px 12px;background:#f1f5f9;border:1px solid #e5e7eb;border-radius:8px;color:#1e293b;text-decoration:none;font-size:12px;font-weight:600;">
+          🔗 네이버 금융에서 전체 뉴스 보기
+        </a>
+      </div>
+    `;
+  }
+  
+  let html = `
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:10px;">📰 관련 뉴스 (최신 ${merged.length}건)</div>
+  `;
+  
+  for (const n of merged.slice(0, 5)) {
+    const impactBadge = renderV22NewsImpactBadge(n);
+    const titleHtml = n.link
+      ? `<a href="${escapeHtml(n.link)}" target="_blank" rel="noopener" style="color:#1e293b;text-decoration:none;font-size:13px;line-height:1.5;display:block;font-weight:500;">${escapeHtml(n.title)}</a>`
+      : `<div style="color:#1e293b;font-size:13px;line-height:1.5;font-weight:500;">${escapeHtml(n.title)}</div>`;
+    
+    html += `
+      <div style="padding:8px 0;border-bottom:1px solid #f1f5f9;">
+        ${titleHtml}
+        <div style="font-size:10px;color:#94a3b8;margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          ${impactBadge}
+          ${n.source ? '<span>' + escapeHtml(n.source) + '</span>' : ''}
+          ${n.date ? '<span>· ' + escapeHtml(n.date) + '</span>' : ''}
+        </div>
+      </div>
+    `;
+  }
+  
+  // 네이버 금융 전체 보기 링크
+  const naverUrl = `https://finance.naver.com/item/news_news.naver?code=${ticker}`;
+  html += `
+    <div style="margin-top:10px;text-align:center;">
+      <a href="${naverUrl}" target="_blank" rel="noopener" 
+         style="display:inline-block;padding:6px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;color:#475569;text-decoration:none;font-size:11px;">
+        네이버 금융에서 전체 뉴스 보기 →
+      </a>
+    </div>
+  `;
+  html += '</div>';
+  return html;
+}
+
+
+// ============================================
+// V10 뉴스 캐시 (회사 PC가 매일 수집한 뉴스 활용)
+// ============================================
+const V10_NEWS_CACHE = { data: null, timestamp: 0, ttl: 5 * 60 * 1000 };  // 5분
+
+async function fetchV10RecentData() {
+  const now = Date.now();
+  if (V10_NEWS_CACHE.data && (now - V10_NEWS_CACHE.timestamp) < V10_NEWS_CACHE.ttl) {
+    return V10_NEWS_CACHE.data;
+  }
+  
+  const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl)
+    ? STATE.settings.newsProxyUrl
+    : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
   
   try {
-    const proxyUrl = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(newsUrl);
-    const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return '';
-    
-    const text = await r.text();
-    const news = parseNaverFinanceNews(text);
-    
-    if (news.length === 0) return '';
-    
-    let html = `
-      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
-        <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:10px;">📰 관련 뉴스 (최신 ${news.length}건)</div>
-    `;
-    
-    for (const n of news.slice(0, 5)) {
-      html += `
-        <div style="padding:8px 0;border-bottom:1px solid #f1f5f9;">
-          <a href="${escapeHtml(n.link)}" target="_blank" style="color:#1e293b;text-decoration:none;font-size:13px;line-height:1.5;display:block;font-weight:500;">
-            ${escapeHtml(n.title)}
-          </a>
-          <div style="font-size:10px;color:#94a3b8;margin-top:3px;">
-            ${escapeHtml(n.source || '')}${n.date ? ' · ' + escapeHtml(n.date) : ''}
-          </div>
-        </div>
-      `;
+    const url = newsProxy.replace(/\/$/, '') + '/v10-recommend';
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) {
+      console.warn('[V10 뉴스] HTTP', r.status);
+      V10_NEWS_CACHE.data = null;
+      V10_NEWS_CACHE.timestamp = now;
+      return null;
     }
-    
-    html += '</div>';
-    return html;
+    const data = await r.json();
+    V10_NEWS_CACHE.data = data;
+    V10_NEWS_CACHE.timestamp = now;
+    return data;
   } catch (e) {
-    console.warn('[V22 News]', e);
-    return '';
+    console.warn('[V10 뉴스] fetch fail', e);
+    V10_NEWS_CACHE.data = null;
+    V10_NEWS_CACHE.timestamp = now;
+    return null;
   }
 }
+
+// V10 데이터에서 특정 종목의 뉴스 추출
+// 다양한 필드명에 방어적으로 대응 (news_items / matched_news / news / items)
+async function fetchV10NewsForTicker(ticker, stockName) {
+  const data = await fetchV10RecentData();
+  if (!data) return [];
+  
+  const allItems = []
+    .concat(Array.isArray(data.recommendations) ? data.recommendations : [])
+    .concat(Array.isArray(data.avoidance) ? data.avoidance : [])
+    .concat(Array.isArray(data.items) ? data.items : []);
+  
+  // 1차: ticker 일치
+  let target = allItems.find(it => String(it.ticker || '').trim() === ticker);
+  // 2차: 종목명 일치 (ticker가 안 잡힐 때)
+  if (!target && stockName) {
+    target = allItems.find(it => String(it.name || '').trim() === stockName);
+  }
+  if (!target) return [];
+  
+  // 뉴스 필드를 방어적으로 수집
+  const rawNews = []
+    .concat(Array.isArray(target.news_items) ? target.news_items : [])
+    .concat(Array.isArray(target.matched_news) ? target.matched_news : [])
+    .concat(Array.isArray(target.news) ? target.news : []);
+  
+  if (rawNews.length === 0) return [];
+  
+  // 정규화
+  return rawNews.map(n => {
+    if (typeof n === 'string') return { title: n, source: 'V10' };
+    return {
+      title: String(n.title || n.headline || '').trim(),
+      link: n.link || n.url || '',
+      source: n.source || n.publisher || 'V10 수집',
+      date: n.date || n.pubDate || n.published_at || '',
+      impact_score: typeof n.impact_score === 'number' ? n.impact_score : null,
+      type: n.type || (n.keyword ? 'matched' : ''),
+      keyword: n.keyword || '',
+      keywords: Array.isArray(n.keywords) ? n.keywords : [],
+    };
+  }).filter(n => n.title && n.title.length >= 4);
+}
+
+// 뉴스 호재/악재 배지
+function renderV22NewsImpactBadge(n) {
+  if (!n) return '';
+  if (n.type === 'strong_negative' || (typeof n.impact_score === 'number' && n.impact_score <= 2)) {
+    return `<span style="display:inline-block;padding:1px 6px;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;color:#b91c1c;font-size:9px;font-weight:700;">⚠️ 악재${n.keyword ? '·' + escapeHtml(n.keyword) : ''}</span>`;
+  }
+  if (typeof n.impact_score === 'number' && n.impact_score >= 8) {
+    return '<span style="display:inline-block;padding:1px 6px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;color:#15803d;font-size:9px;font-weight:700;">✅ 호재</span>';
+  }
+  if (typeof n.impact_score === 'number' && n.impact_score <= 4) {
+    return '<span style="display:inline-block;padding:1px 6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;color:#c2410c;font-size:9px;font-weight:700;">주의</span>';
+  }
+  return '';
+}
+
+// 네이버 금융 뉴스 (보조 - 정규식 안 맞아도 안전하게 0건 반환)
+async function fetchNaverFinanceNews(ticker) {
+  const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl)
+    ? STATE.settings.newsProxyUrl
+    : 'https://ykh-news-proxy.kyunghoyou.workers.dev';
+  if (!newsProxy) return [];
+  
+  const newsUrl = `https://finance.naver.com/item/news_news.naver?code=${ticker}`;
+  try {
+    const proxyUrl = newsProxy.replace(/\/$/, '') + '/?url=' + encodeURIComponent(newsUrl);
+    const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return [];
+    const text = await r.text();
+    return parseNaverFinanceNews(text);
+  } catch (e) {
+    console.warn('[Naver News]', e);
+    return [];
+  }
+}
+
+
+// (구) fetchV22StockNews 원본 본문은 위 신규 함수가 대체하면서 제거되었습니다.
+// 네이버 금융 뉴스는 fetchNaverFinanceNews() 헬퍼로 분리되었습니다.
 
 
 function parseNaverFinanceNews(html) {
@@ -1717,19 +1908,22 @@ function parseNaverFinanceNews(html) {
       if (!t) return;
       
       let attempts = 0;
-      const tryOpen = async () => {
+      const tryOpen = () => {
         attempts++;
-        if (attempts > 30) {
-          const ticker = await v22ResolveTicker(t);
-          if (ticker) openV22ItemDetail(ticker);
+        
+        const ready = (typeof V22_CACHE !== 'undefined' && V22_CACHE && V22_CACHE.data);
+        if (!ready && attempts <= 30) {
+          setTimeout(tryOpen, 100);
           return;
         }
         
-        if (typeof V22_CACHE !== 'undefined' && V22_CACHE && V22_CACHE.data) {
-          const ticker = await v22ResolveTicker(t);
-          if (ticker) openV22ItemDetail(ticker);
+        // v22ResolveTicker는 {ticker, name} 객체 또는 null 반환
+        const resolved = v22ResolveTicker(t);
+        if (resolved && resolved.ticker) {
+          openV22ItemDetail(resolved.ticker);
         } else {
-          setTimeout(tryOpen, 100);
+          // KR_STOCKS에서 못 찾으면 → openV22ItemDetail 안의 Worker /stock-search 폴백 활용
+          openV22ItemDetail(String(t));
         }
       };
       
