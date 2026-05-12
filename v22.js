@@ -1269,7 +1269,7 @@ async function loadV22ExtraInfo(item) {
 
 function renderV22CompanyInfo(dartData) {
   const company = dartData.company || {};
-  if (!company.corp_name && !company.induty_code && !company.ceo_nm) return '';
+  if (!company.corp_name && !company.industry_code && !company.ceo_nm) return '';
   
   let html = `
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
@@ -1278,19 +1278,23 @@ function renderV22CompanyInfo(dartData) {
   
   const rows = [];
   if (company.corp_name) rows.push(['회사명', escapeHtml(company.corp_name)]);
-  if (company.induty_code) rows.push(['업종', escapeHtml(company.induty_code)]);
+  if (company.corp_name_eng) rows.push(['영문명', escapeHtml(company.corp_name_eng)]);
   if (company.ceo_nm) rows.push(['대표이사', escapeHtml(company.ceo_nm)]);
-  if (company.est_dt) {
-    const est = company.est_dt;
+  if (company.industry_code) rows.push(['업종코드', escapeHtml(company.industry_code)]);
+  if (company.establishment_date) {
+    const est = company.establishment_date;
     const formatted = est.length === 8 ? `${est.slice(0,4)}.${est.slice(4,6)}.${est.slice(6,8)}` : est;
     rows.push(['설립일', formatted]);
   }
-  if (company.adres) {
-    const addr = company.adres.length > 35 ? company.adres.substring(0, 35) + '…' : company.adres;
+  if (company.address) {
+    const addr = company.address.length > 35 ? company.address.substring(0, 35) + '…' : company.address;
     rows.push(['주소', escapeHtml(addr)]);
   }
-  if (company.hm_url) {
-    rows.push(['홈페이지', `<a href="${escapeHtml(company.hm_url)}" target="_blank" style="color:#7c3aed;text-decoration:none;">방문하기 →</a>`]);
+  if (company.phone) rows.push(['전화', escapeHtml(company.phone)]);
+  if (company.homepage) {
+    let url = company.homepage;
+    if (!url.startsWith('http')) url = 'http://' + url;
+    rows.push(['홈페이지', `<a href="${escapeHtml(url)}" target="_blank" style="color:#7c3aed;text-decoration:none;">방문하기 →</a>`]);
   }
   
   for (const [label, value] of rows) {
@@ -1308,45 +1312,79 @@ function renderV22CompanyInfo(dartData) {
 
 
 function renderV22Financials(dartData) {
-  const financial = dartData.financial || {};
-  const annual = financial.annual || {};
-  const quarter = financial.latest_quarter || {};
+  // 실제 응답: dartData.financials (s 붙음)
+  const financials = dartData.financials || dartData.financial || {};
+  const annual = financials.annual || {};
+  const quarter = financials.latest_quarter || {};
   
-  if (!annual.revenue && !annual.operating_profit && !quarter.revenue) return '';
+  if (!annual.revenue && !annual.operating_profit && !quarter.revenue_cumulative) return '';
   
   let html = `
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:14px;">
       <div style="font-size:11px;font-weight:700;color:#475569;letter-spacing:1px;margin-bottom:10px;">📊 재무 실적</div>
   `;
   
-  if (annual.revenue || annual.operating_profit || annual.net_profit) {
-    const year = annual.year || annual.bsns_year || '';
-    html += `<div style="font-size:11px;font-weight:600;color:#7c3aed;margin-bottom:6px;">📅 ${year}년 연간</div>`;
+  // 연간 실적
+  if (annual.revenue || annual.operating_profit || annual.net_income) {
+    const year = annual.year || '';
+    const reportName = annual.report_name ? ` <span style="color:#94a3b8;font-weight:400;font-size:9px;">(${escapeHtml(annual.report_name)})</span>` : '';
+    html += `<div style="font-size:11px;font-weight:600;color:#7c3aed;margin-bottom:6px;">📅 ${year}년 연간${reportName}</div>`;
     
     if (annual.revenue) {
-      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">매출액</span><span style="font-family:'DM Mono',monospace;font-weight:600;">${formatV22Money(annual.revenue)}</span></div>`;
+      const yoy = annual.revenue_growth_yoy;
+      const yoyText = (yoy !== null && yoy !== undefined && !isNaN(yoy)) 
+        ? ` <span style="font-size:10px;color:${yoy >= 0 ? '#16a34a' : '#dc2626'};">(${yoy >= 0 ? '+' : ''}${yoy.toFixed(1)}%)</span>` 
+        : '';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">매출액</span><span style="font-family:'DM Mono',monospace;font-weight:600;">${formatV22Money(annual.revenue)}${yoyText}</span></div>`;
     }
-    if (annual.operating_profit) {
+    if (annual.operating_profit !== undefined && annual.operating_profit !== null) {
       const color = annual.operating_profit >= 0 ? '#16a34a' : '#dc2626';
-      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">영업이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(annual.operating_profit)}</span></div>`;
+      const margin = annual.operating_margin;
+      const marginText = (margin !== null && margin !== undefined && !isNaN(margin))
+        ? ` <span style="font-size:10px;color:#94a3b8;">(${margin.toFixed(1)}%)</span>`
+        : '';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">영업이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(annual.operating_profit)}${marginText}</span></div>`;
     }
-    if (annual.net_profit) {
-      const color = annual.net_profit >= 0 ? '#16a34a' : '#dc2626';
-      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">순이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(annual.net_profit)}</span></div>`;
+    if (annual.net_income !== undefined && annual.net_income !== null) {
+      const color = annual.net_income >= 0 ? '#16a34a' : '#dc2626';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">순이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(annual.net_income)}</span></div>`;
+    }
+    
+    // 추가 지표
+    if (annual.debt_ratio !== undefined && annual.debt_ratio !== null && !isNaN(annual.debt_ratio)) {
+      const color = annual.debt_ratio <= 100 ? '#16a34a' : (annual.debt_ratio <= 200 ? '#f59e0b' : '#dc2626');
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">부채비율</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${annual.debt_ratio.toFixed(1)}%</span></div>`;
+    }
+    if (annual.roe !== undefined && annual.roe !== null && !isNaN(annual.roe)) {
+      const color = annual.roe >= 0 ? '#16a34a' : '#dc2626';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">ROE</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${annual.roe.toFixed(1)}%</span></div>`;
     }
   }
   
-  if (quarter.revenue || quarter.operating_profit) {
-    const q = quarter.quarter || '';
+  // 분기 실적 (누적)
+  if (quarter.revenue_cumulative || quarter.operating_profit_cumulative) {
     const year = quarter.year || '';
-    html += `<div style="font-size:11px;font-weight:600;color:#7c3aed;margin-top:10px;margin-bottom:6px;border-top:1px solid #f1f5f9;padding-top:8px;">📅 ${year}년 ${q}분기</div>`;
+    const reportName = quarter.report_name || '분기';
+    html += `<div style="font-size:11px;font-weight:600;color:#7c3aed;margin-top:10px;margin-bottom:6px;border-top:1px solid #f1f5f9;padding-top:8px;">📅 ${year}년 ${escapeHtml(reportName)} (누적)</div>`;
     
-    if (quarter.revenue) {
-      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">매출액</span><span style="font-family:'DM Mono',monospace;font-weight:600;">${formatV22Money(quarter.revenue)}</span></div>`;
+    if (quarter.revenue_cumulative) {
+      const yoy = quarter.revenue_growth_yoy;
+      const yoyText = (yoy !== null && yoy !== undefined && !isNaN(yoy))
+        ? ` <span style="font-size:10px;color:${yoy >= 0 ? '#16a34a' : '#dc2626'};">(${yoy >= 0 ? '+' : ''}${yoy.toFixed(1)}%)</span>`
+        : '';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">매출액</span><span style="font-family:'DM Mono',monospace;font-weight:600;">${formatV22Money(quarter.revenue_cumulative)}${yoyText}</span></div>`;
     }
-    if (quarter.operating_profit) {
-      const color = quarter.operating_profit >= 0 ? '#16a34a' : '#dc2626';
-      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">영업이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(quarter.operating_profit)}</span></div>`;
+    if (quarter.operating_profit_cumulative !== undefined && quarter.operating_profit_cumulative !== null) {
+      const color = quarter.operating_profit_cumulative >= 0 ? '#16a34a' : '#dc2626';
+      const margin = quarter.operating_margin;
+      const marginText = (margin !== null && margin !== undefined && !isNaN(margin))
+        ? ` <span style="font-size:10px;color:#94a3b8;">(${margin.toFixed(1)}%)</span>`
+        : '';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">영업이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(quarter.operating_profit_cumulative)}${marginText}</span></div>`;
+    }
+    if (quarter.net_income_cumulative !== undefined && quarter.net_income_cumulative !== null) {
+      const color = quarter.net_income_cumulative >= 0 ? '#16a34a' : '#dc2626';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span style="color:#64748b;">순이익</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:${color};">${formatV22Money(quarter.net_income_cumulative)}</span></div>`;
     }
   }
   
