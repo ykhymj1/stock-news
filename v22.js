@@ -404,14 +404,28 @@ function showV22NotAvailable() {
 // ============================================
 // V22 상세 모달
 // ============================================
-async function openV22ItemDetail(ticker) {
+async function openV22ItemDetail(tickerInput) {
+  // ⚠️ 입력값 안전성 보장 - 항상 string으로 변환
+  const ticker = String(tickerInput || '').trim();
+  if (!ticker) {
+    console.warn('[openV22ItemDetail] 빈 입력');
+    return;
+  }
+  
   let item = null;
   
   // 1) V22 추천/차단 풀에서 찾기 (티커로)
-  if (V22_CACHE && V22_CACHE.data) {
+  if (typeof V22_CACHE !== 'undefined' && V22_CACHE && V22_CACHE.data) {
     item = (V22_CACHE.data.recommendations || []).find(r => r.ticker === ticker);
     if (!item) {
       item = (V22_CACHE.data.blocked || []).find(b => b.ticker === ticker);
+    }
+    // 추가: 종목명으로도 매칭 (V22 추천 종목명이 들어왔을 경우)
+    if (!item) {
+      item = (V22_CACHE.data.recommendations || []).find(r => r.name === ticker);
+      if (!item) {
+        item = (V22_CACHE.data.blocked || []).find(b => b.name === ticker);
+      }
     }
   }
   
@@ -419,37 +433,49 @@ async function openV22ItemDetail(ticker) {
   if (!item) {
     let resolvedTicker = ticker;
     let stockName = ticker;
+    let found = false;
     
     // 6자리 티커면 그대로 사용
     if (/^[0-9A-Z]{6}$/i.test(ticker)) {
       resolvedTicker = ticker.toUpperCase();
-      // 이름은 일단 티커로
+      stockName = ticker;
+      found = true;
+      // 이름은 일단 티커로 (Worker가 알려줄 수도)
       if (typeof window !== 'undefined' && window.KR_CODE_TO_NAME) {
-        stockName = window.KR_CODE_TO_NAME[ticker] || ticker;
+        const fromMap = window.KR_CODE_TO_NAME[ticker];
+        if (typeof fromMap === 'string') stockName = fromMap;
       }
     } else {
-      // 종목명이면 → KR_STOCKS 먼저 시도
-      let found = false;
-      if (typeof window !== 'undefined' && window.KR_STOCKS) {
-        if (window.KR_STOCKS[ticker]) {
-          resolvedTicker = window.KR_STOCKS[ticker];
-          stockName = ticker;
-          found = true;
-        } else {
-          // 부분 일치
-          const names = Object.keys(window.KR_STOCKS).sort((a, b) => b.length - a.length);
-          for (const name of names) {
-            if (ticker === name || ticker.includes(name) || name.includes(ticker)) {
-              resolvedTicker = window.KR_STOCKS[name];
-              stockName = name;
-              found = true;
-              break;
+      // 종목명 → KR_STOCKS 먼저 (안전하게)
+      try {
+        if (typeof window !== 'undefined' && window.KR_STOCKS && typeof window.KR_STOCKS === 'object') {
+          const directMatch = window.KR_STOCKS[ticker];
+          if (typeof directMatch === 'string' && /^[0-9A-Z]{6}$/i.test(directMatch)) {
+            resolvedTicker = directMatch;
+            stockName = ticker;
+            found = true;
+          } else {
+            // 부분 일치 (안전하게 - string만 처리)
+            const names = Object.keys(window.KR_STOCKS).sort((a, b) => b.length - a.length);
+            for (const name of names) {
+              if (typeof name !== 'string') continue;
+              const code = window.KR_STOCKS[name];
+              if (typeof code !== 'string' || !/^[0-9A-Z]{6}$/i.test(code)) continue;
+              
+              if (ticker === name || ticker.indexOf(name) >= 0 || name.indexOf(ticker) >= 0) {
+                resolvedTicker = code;
+                stockName = name;
+                found = true;
+                break;
+              }
             }
           }
         }
+      } catch (e) {
+        console.warn('[V22 KR_STOCKS 검색]', e);
       }
       
-      // KR_STOCKS에서 못 찾으면 → 🆕 Worker /stock-search 활용
+      // KR_STOCKS에서 못 찾으면 → Worker /stock-search 호출
       if (!found) {
         try {
           const newsProxy = (typeof STATE !== 'undefined' && STATE.settings && STATE.settings.newsProxyUrl) 
@@ -460,10 +486,11 @@ async function openV22ItemDetail(ticker) {
           const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
           if (r.ok) {
             const data = await r.json();
-            if (data.ok && data.ticker) {
+            if (data.ok && typeof data.ticker === 'string' && /^[0-9A-Z]{6}$/i.test(data.ticker)) {
               resolvedTicker = data.ticker;
-              stockName = data.name || ticker;
+              stockName = (typeof data.name === 'string' && data.name) ? data.name : ticker;
               found = true;
+              console.log('[V22 stock-search] 변환 성공:', ticker, '→', resolvedTicker, stockName);
             }
           }
         } catch (e) {
@@ -472,7 +499,6 @@ async function openV22ItemDetail(ticker) {
       }
       
       if (!found) {
-        // Worker도 실패하면 종목명 그대로 (DART API 실패할 것)
         if (typeof showToast === 'function') {
           showToast('종목을 찾을 수 없습니다: ' + ticker);
         }
@@ -492,35 +518,15 @@ async function openV22ItemDetail(ticker) {
 }
 
 // 종목명/티커 정규화 (V10 뉴스 링크의 ?t=종목명 처리용)
-async function v22ResolveTicker(query) {
+async function v22ResolveTicker(queryInput) {
+  // 안전성 보장
+  const query = String(queryInput || '').trim();
   if (!query) return null;
   
-  // 1) 6자리 영숫자면 그대로 (티커)
+  // 1) 6자리 영숫자면 그대로
   if (/^[0-9A-Z]{6}$/i.test(query)) return query.toUpperCase();
   
-  // 2) V22 풀에서 종목명으로 찾기
-  if (V22_CACHE && V22_CACHE.data) {
-    const match = (V22_CACHE.data.recommendations || []).find(r => r.name === query);
-    if (match) return match.ticker;
-    const matchB = (V22_CACHE.data.blocked || []).find(b => b.name === query);
-    if (matchB) return matchB.ticker;
-  }
-  
-  // 3) 🆕 KR_STOCKS 전체 종목 마스터에서 찾기 (kr_stocks.js)
-  if (typeof window !== 'undefined' && window.KR_STOCKS) {
-    // 정확 일치
-    if (window.KR_STOCKS[query]) return window.KR_STOCKS[query];
-    
-    // 부분 일치 (긴 이름 우선)
-    const names = Object.keys(window.KR_STOCKS).sort((a, b) => b.length - a.length);
-    for (const name of names) {
-      if (query === name || query.includes(name) || name.includes(query)) {
-        return window.KR_STOCKS[name];
-      }
-    }
-  }
-  
-  // 4) 못 찾으면 query 그대로 (모달이 알아서 처리)
+  // openV22ItemDetail 자체가 이제 종목명도 처리하니까 그대로 반환
   return query;
 }
 
