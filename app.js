@@ -2402,6 +2402,9 @@ function saveTrackingMemo(ticker, market) {
   t.memoUpdatedAt = new Date().toISOString();
   saveState();
   
+  // 🆕 추적 리스트도 백그라운드에서 갱신 (모달 닫고 돌아갔을 때 미리보기 즉시 반영)
+  renderTracking();
+  
   // 상태 표시 갱신 (모달이 아직 열려있으면)
   const status = document.getElementById('memoStatus');
   if (status) {
