@@ -1,6 +1,6 @@
-// StockRadar Service Worker v37 (네트워크 우선 + 자동 업데이트)
-// 변경: HTML/JS/CSS 파일들을 모두 네트워크 우선으로 - PWA에서도 즉시 최신 반영
-const CACHE = 'stockradar-v37';
+// StockRadar Service Worker v38 (V22 최적 보유 기간 표시 추가)
+// 변경: V22 화면에 백테스트 검증된 최적 보유 기간 표시
+const CACHE = 'stockradar-v38';
 const FILES = [
   './index.html', './app.js', './v22.js', './kr_stocks.js', './kr_stocks_extra.js', './us_stocks.js', './stock_info.js', './manifest.json',
   './favicon.ico',

@@ -233,6 +233,12 @@ function renderV22TopCard(item) {
           <span class="v22-stop-loss-label">손절가 (-5%)</span>
           <span class="v22-stop-loss">${item.stop_price.toLocaleString()}원</span>
         </div>
+        ${item.optimal_hold_text ? `
+        <div class="v22-optimal-hold" style="margin-top:10px;padding:10px 12px;background:rgba(245,158,11,0.15);border-left:3px solid #f59e0b;border-radius:8px;">
+          <div style="font-size:11px;color:#92400e;font-weight:600;margin-bottom:3px;">⏱️ 백테스트 최적 보유</div>
+          <div style="font-size:14px;color:#451a03;font-weight:700;">${escapeHtml(item.optimal_hold_text)}</div>
+          ${item.optimal_detail ? `<div style="font-size:10px;color:#78350f;margin-top:3px;opacity:0.8;">${escapeHtml(item.optimal_detail)}</div>` : ''}
+        </div>` : ''}
       </div>
     `;
   }
@@ -339,6 +345,10 @@ function renderV22Rest(items) {
           <span class="v22-rest-buy">🎯 ${item.buy_price_low.toLocaleString()}~${item.buy_price_high.toLocaleString()}원</span>
           <span class="v22-rest-target">📈 +${item.tp_pct}% / ${item.hold_days}일</span>
         </div>
+        ${item.optimal_hold_short ? `
+        <div style="margin-top:6px;padding:6px 10px;background:rgba(245,158,11,0.12);border-radius:6px;font-size:11px;color:#92400e;font-weight:600;">
+          ⏱️ 최적 보유: ${escapeHtml(item.optimal_hold_short)}
+        </div>` : ''}
       </div>
     `;
   }).join('');
@@ -631,6 +641,16 @@ function showV22DetailModal(item) {
           </div>
           <div style="font-size:14px;font-weight:700;color:#dc2626;font-family:'DM Mono',monospace;">${item.stop_price.toLocaleString()}원</div>
         </div>
+        ${item.optimal_hold_text ? `
+        <div style="margin-top:12px;padding:12px;background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;border:1px solid #f59e0b;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <span style="font-size:14px;">⏱️</span>
+            <span style="font-size:11px;font-weight:700;color:#92400e;letter-spacing:0.5px;">백테스트 검증된 최적 보유</span>
+          </div>
+          <div style="font-size:15px;font-weight:700;color:#451a03;margin-bottom:4px;">${escapeHtml(item.optimal_hold_text)}</div>
+          ${item.optimal_detail ? `<div style="font-size:11px;color:#78350f;line-height:1.4;">${escapeHtml(item.optimal_detail)}</div>` : ''}
+          <div style="font-size:9px;color:#92400e;margin-top:6px;opacity:0.8;">※ V22-OPT3 5년 백테스트(n=888) 검증</div>
+        </div>` : ''}
       </div>
     `;
     
